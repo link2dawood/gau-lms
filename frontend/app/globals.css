@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Design tokens. GAU branding (task 4.5) replaces these values; no component
+ * hard-codes a colour.
+ *
+ * Channels are space-separated RGB so Tailwind's <alpha-value> works.
+ */
+@layer base {
+  :root {
+    --color-surface: 255 255 255;
+    --color-surface-muted: 246 247 249;
+    --color-ink: 26 32 44;
+    --color-ink-muted: 90 100 116;
+    --color-accent: 27 61 110;
+    --color-border: 222 226 232;
+    --color-danger: 176 32 36;
+
+    --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    --font-serif: ui-serif, Georgia, Cambria, 'Times New Roman', serif;
+  }
+
+  html {
+    /* The reader restores a saved position by scrolling to a block anchor
+       (task 2.10). Smooth scrolling there is disorienting, and it fights
+       assistive technology. */
+    scroll-behavior: auto;
+  }
+
+  body {
+    @apply bg-surface text-ink font-sans antialiased;
+  }
+
+  /* Keyboard navigation is a Phase 1 acceptance concern (task 2.14), so focus
+     is visible everywhere by default rather than restored case by case. */
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-accent;
+    outline-style: solid;
+  }
+}

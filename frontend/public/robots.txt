@@ -1,0 +1,3 @@
+# The textbook is launched from Canvas and requires an authenticated session.
+User-agent: *
+Disallow: /

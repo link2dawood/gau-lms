@@ -7,7 +7,7 @@ A task is `DONE` only when a passing test or a verified command proved it.
 A task is `BLOCKED` with the specific question recorded inline, so the next loop
 does not repeat the work.
 
-**Current status:** Stage 0 in progress. Next task: **0.4**.
+**Current status:** Stage 0 in progress. Next task: **0.5**.
 
 ---
 
@@ -18,7 +18,7 @@ does not repeat the work.
 | 0.1 | Git repo, `.gitignore`, branch strategy, PR template `[micro]` | — | **DONE** |
 | 0.2 | Docker Compose: postgres, redis, meilisearch, backend, frontend, celery worker, celery beat, nginx | 0.1 | **DONE** |
 | 0.3 | Django project with split settings, `.env.example` listing every variable | 0.2 | **DONE** |
-| 0.4 | Next.js 14 app with TypeScript, Tailwind, path aliases, typed API client shell | 0.2 | TODO |
+| 0.4 | Next.js 14 app with TypeScript, Tailwind, path aliases, typed API client shell | 0.2 | **DONE** |
 | 0.5 | pytest and Playwright configured, one smoke test each | 0.3, 0.4 | TODO |
 | 0.6 | GitHub Actions: ruff, mypy, pytest, eslint, tsc, next build | 0.5 | TODO |
 | 0.7 | `docs/ARCHITECTURE.md` and `docs/ENVIRONMENT.md` first draft | 0.3 | TODO |
@@ -86,6 +86,36 @@ launch is expensive. 4.8 should proxy through a variable with a `resolver`,
 deferring resolution to request time — which costs upstream keepalive, so the
 trade belongs with the production deployment. Documented in
 `docker/nginx/conf.d/app.conf`.
+
+**0.4 notes —** Next.js 14.2.33 / React 18.3.1 / TypeScript 5.6.3 / Tailwind
+3.4.17, all pinned exactly and locked. App Router with layout, status page,
+`not-found` and an `error` boundary. Path aliases `@/*`, `@/lib/*`,
+`@/components/*`.
+
+The API client is the substantive piece. Calls return `ApiResult<T>` rather than
+throwing (D-014), responses are validated by a guard rather than cast (D-015),
+and the base URL resolves per execution context (D-016). `lib/api/health.ts` is
+the worked example every later binding copies: response type, `parseX` guard,
+typed function.
+
+Points the next loops must respect:
+
+- **Do not run `npm run build` inside the `dev` image.** That stage pins
+  `NODE_ENV=development`, so Next mixes dev and production React runtimes and
+  prerendering fails with a `useContext` error that looks like an application
+  bug. The production build belongs to the `builder` stage — build the `prod`
+  target.
+- TypeScript runs with `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes`.
+  Indexing into a content node's children yields `T | undefined`, which the
+  tree code in task 2.3 must handle rather than assert away.
+- `next.config.mjs` sets `ignoreDuringBuilds` for ESLint (linting is its own CI
+  step in 0.6) but **not** for TypeScript — a type error fails the build.
+- Design tokens are CSS custom properties in `app/globals.css`, referenced from
+  `tailwind.config.ts`. GAU branding in task 4.5 changes values there; no
+  component hard-codes a colour.
+- `frontend/node_modules` is a named volume in compose. It is populated from the
+  image on first use, so after changing dependencies the volume must be removed
+  or it will serve the old tree.
 
 ---
 

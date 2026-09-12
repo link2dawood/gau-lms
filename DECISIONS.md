@@ -271,3 +271,65 @@ administrator sees stale search results with no explanation.
 **Consequences:** Task modules live at `apps.<module>.tasks` so the routing
 patterns match without per-task decoration. Production runs a worker per queue
 with its own concurrency (task 4.8).
+
+---
+
+## D-014 — API calls return a result, they do not throw
+
+**Date:** 2026-09-12 · **Task:** 0.4
+
+`lib/api/client.ts` returns `ApiResult<T>` — a discriminated union of
+`{ok: true, data}` or `{ok: false, error}` — rather than throwing. `ApiError`
+carries a `kind` of `network`, `malformed`, `unauthenticated`, `forbidden`,
+`not_found`, `client` or `server`.
+
+**Rationale:** The reader has to show a different screen for each of these. An
+expired launch means "reopen from Canvas"; a forbidden node means "not in this
+course"; an unreachable backend means "try again". A thrown `Error` flattens all
+of that into a string and moves the decision to a comparison at the call site,
+where it is easy to get wrong and impossible for the compiler to check. With a
+union, TypeScript refuses to let a caller read `.data` without first handling
+the failure.
+
+**Consequences:** Every API binding follows this shape. Verified end to end in
+0.4: the same page renders three distinct messages for healthy, 503 and
+unreachable. Unexpected exceptions still reach `app/error.tsx`.
+
+---
+
+## D-015 — Responses are validated at the boundary, never cast
+
+**Date:** 2026-09-12 · **Task:** 0.4
+
+`request()` takes a `Validator<T>` that narrows `unknown` to `T` or returns
+null, producing a `malformed` error. No response is cast with `as`.
+
+**Rationale:** A cast asserts a shape the compiler cannot verify. When the
+backend contract changes — a field renamed during Sprint 2, a node type added in
+Sprint 3 — a cast turns that into an `undefined` surfacing deep inside a
+component, far from the cause. A guard turns it into a single explicit error at
+the boundary, naming the request that failed.
+
+**Consequences:** Each binding ships a `parseX` guard next to its type. Content
+node and version responses (tasks 2.6, 3.6) carry nested structures, so their
+guards must validate recursively rather than checking only the outer shape.
+
+---
+
+## D-016 — The API base URL is resolved per execution context
+
+**Date:** 2026-09-12 · **Task:** 0.4
+
+`lib/config.ts` returns `INTERNAL_API_BASE_URL` when running on the server and a
+same-origin relative path in the browser.
+
+**Rationale:** A React Server Component rendering a textbook section would
+otherwise call the public hostname, leaving the container, traversing Nginx and
+coming back — extra latency on the critical path of first paint for long-form
+content, and a dependency on public DNS resolving from inside the network.
+Browser requests must stay same-origin so the session cookie is sent and Nginx
+routes them.
+
+**Consequences:** `INTERNAL_API_BASE_URL` is set in `docker-compose.yml` and
+documented in `.env.example`. Only `NEXT_PUBLIC_`-prefixed variables exist in
+the browser, so the internal URL cannot leak into the client bundle.
