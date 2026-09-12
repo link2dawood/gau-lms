@@ -7,7 +7,7 @@ A task is `DONE` only when a passing test or a verified command proved it.
 A task is `BLOCKED` with the specific question recorded inline, so the next loop
 does not repeat the work.
 
-**Current status:** Stage 0 in progress. Next task: **0.2**.
+**Current status:** Stage 0 in progress. Next task: **0.3**.
 
 ---
 
@@ -16,7 +16,7 @@ does not repeat the work.
 | Id | Task | Depends on | Status |
 |---|---|---|---|
 | 0.1 | Git repo, `.gitignore`, branch strategy, PR template `[micro]` | — | **DONE** |
-| 0.2 | Docker Compose: postgres, redis, meilisearch, backend, frontend, celery worker, celery beat, nginx | 0.1 | TODO |
+| 0.2 | Docker Compose: postgres, redis, meilisearch, backend, frontend, celery worker, celery beat, nginx | 0.1 | **DONE** |
 | 0.3 | Django project with split settings, `.env.example` listing every variable | 0.2 | TODO |
 | 0.4 | Next.js 14 app with TypeScript, Tailwind, path aliases, typed API client shell | 0.2 | TODO |
 | 0.5 | pytest and Playwright configured, one smoke test each | 0.3, 0.4 | TODO |
@@ -29,6 +29,31 @@ directory); `backend/`, `frontend/`, `docs/` sit directly at the top level. See
 `CONTRIBUTING.md`; the PR template encodes the Section C architecture rules as a
 per-PR checklist. `.gitignore` covers Python, Node, Docker volumes, env files and
 private keys — `.env.example` is the one env file that is committed.
+
+**0.2 notes —** All eight services defined in `docker-compose.yml`; Dockerfiles
+and Nginx configuration in `docker/` (DECISIONS.md D-005). Verified running:
+PostgreSQL 16.15, Redis 7.2.16 with AOF persistence, Meilisearch 1.12.8
+rejecting unauthenticated requests. Nginx routing proven against probe upstreams
+— `/api/ /lti/ /admin/` to the backend, `/static/ /media/` served from disk,
+everything else to Next.js — with the full `X-Forwarded-*` set surviving, which
+task 1.9 depends on for `SameSite=None; Secure` cookies. Backend `base` image
+builds with Python 3.12.14, Pandoc 2.17.1.1 (docx/epub/html) and Poppler 22.12.
+
+Carried forward to the next loops:
+
+- The **backend `dev`/`prod` stages** install from `backend/pyproject.toml` and
+  the **frontend image** installs from `frontend/package-lock.json`. Neither
+  manifest exists yet, so those image builds are first exercised by **0.3** and
+  **0.4** respectively. The `base` stage — the part carrying real risk, the
+  document-conversion toolchain — is built and verified now.
+- Compose reads `.env`; copy `.env.example` and set `POSTGRES_PASSWORD` and
+  `MEILI_MASTER_KEY`, which have no defaults and fail fast if unset.
+- Host ports are configurable because collisions are common: on this machine
+  5432 and 5433 were already held by unrelated projects, and verification ran
+  with `POSTGRES_HOST_PORT=5434`.
+- Named volumes `pg_data`, `redis_data`, `meili_data` persist across `down`.
+- BuildKit image builds hit a transient `deb.debian.org` fetch failure once and
+  succeeded unchanged on retry; not a configuration fault.
 
 ---
 

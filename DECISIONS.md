@@ -83,3 +83,79 @@ same applies to database and Meilisearch credentials.
 1.3) and supplied to running environments as configuration, not as a committed
 file. Any task that introduces a new setting adds it to `.env.example` in the
 same PR.
+
+---
+
+## D-005 — Container build and configuration assets live in `docker/`
+
+**Date:** 2026-09-12 · **Task:** 0.2
+
+`docker-compose.yml` and `.env.example` sit at the repository root as the plan
+specifies. Everything the containers are built and configured from —
+`backend.Dockerfile`, `frontend.Dockerfile`, the Nginx configuration — lives in
+a top-level `docker/` directory rather than inside `backend/` and `frontend/`.
+
+**Rationale:** The backend image is built once and run three ways (web, Celery
+worker, Celery beat), and Nginx belongs to neither application. Keeping build
+assets together means the build context is the repository root for both images,
+so a Dockerfile can reach any path it needs without a parent-directory escape.
+
+**Consequences:** Both images are built with `context: .` and an explicit
+`dockerfile:`. Paths inside the Dockerfiles are repository-relative
+(`COPY backend/pyproject.toml`), not directory-relative.
+
+---
+
+## D-006 — Redis is pinned to the 7.2 line
+
+**Date:** 2026-09-12 · **Task:** 0.2
+
+`redis:7.2-alpine`, not a later tag.
+
+**Rationale:** Redis 7.2 is the last release under the BSD-3 licence. From 7.4
+the project moved to RSALv2/SSPL, which is not an open-source licence. Phase 1
+is offered to GAU as a stack that is free and open source end to end with no
+licence exposure, and the technology table in the plan lists Redis as BSD. A
+silent bump to 7.4 or 8.x would quietly break that promise.
+
+**Consequences:** The pin is deliberate and must not be "upgraded" as
+housekeeping. If a later Redis feature is ever needed, the open-source route is
+Valkey (the BSD-licensed fork), which is a stack change requiring approval under
+Section B.
+
+---
+
+## D-007 — Gunicorn serves every environment, including local development
+
+**Date:** 2026-09-12 · **Task:** 0.2
+
+The backend container runs Gunicorn locally with `--reload` rather than
+`manage.py runserver`.
+
+**Rationale:** Canvas launch handling is sensitive to exactly the things that
+differ between the two servers — header handling behind a proxy, `SCRIPT_NAME`
+and forwarded-scheme resolution, worker concurrency, and how streaming
+responses behave. Reproducing a launch bug is far easier when the development
+process is the production process. `--reload` keeps the fast edit loop.
+
+**Consequences:** Django's autoreloader is not in play; Gunicorn's is.
+Development still gets reload-on-save, and a launch that works locally is
+meaningfully evidence that it will work deployed.
+
+---
+
+## D-008 — Redis logical databases are separated by purpose
+
+**Date:** 2026-09-12 · **Task:** 0.2
+
+Cache on db 0, Celery broker on db 1, Celery results on db 2, LTI state and
+nonces on db 3. Each has its own URL in `.env.example`.
+
+**Rationale:** These have different consistency requirements and different
+failure costs. Clearing the cache is routine; doing so must not drop a queued
+textbook import or invalidate an in-flight OIDC nonce, which would break a
+launch that is already in progress. Separate logical databases make
+`FLUSHDB` on the cache safe.
+
+**Consequences:** Any new Redis use declares which logical database it belongs
+to and adds its own URL setting. `FLUSHALL` is never used.
