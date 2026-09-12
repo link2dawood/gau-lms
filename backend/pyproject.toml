@@ -84,7 +84,10 @@ django_settings_module = "config.settings.dev"
 
 # -------------------------------------------------------------------- pytest
 [tool.pytest.ini_options]
-DJANGO_SETTINGS_MODULE = "config.settings.test"
 python_files = ["test_*.py", "*_test.py"]
 testpaths = ["tests", "apps"]
-addopts = "--strict-markers --strict-config -ra"
+# --ds is passed rather than set as DJANGO_SETTINGS_MODULE because pytest-django
+# reads the environment first: a developer's .env, or the compose environment,
+# would otherwise silently run the suite under dev settings. The command line
+# wins over both, so the suite always uses test settings.
+addopts = "--strict-markers --strict-config -ra --ds=config.settings.test"

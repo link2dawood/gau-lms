@@ -7,7 +7,7 @@ A task is `DONE` only when a passing test or a verified command proved it.
 A task is `BLOCKED` with the specific question recorded inline, so the next loop
 does not repeat the work.
 
-**Current status:** Stage 0 in progress. Next task: **0.5**.
+**Current status:** Stage 0 in progress. Next task: **0.6**.
 
 ---
 
@@ -19,7 +19,7 @@ does not repeat the work.
 | 0.2 | Docker Compose: postgres, redis, meilisearch, backend, frontend, celery worker, celery beat, nginx | 0.1 | **DONE** |
 | 0.3 | Django project with split settings, `.env.example` listing every variable | 0.2 | **DONE** |
 | 0.4 | Next.js 14 app with TypeScript, Tailwind, path aliases, typed API client shell | 0.2 | **DONE** |
-| 0.5 | pytest and Playwright configured, one smoke test each | 0.3, 0.4 | TODO |
+| 0.5 | pytest and Playwright configured, one smoke test each | 0.3, 0.4 | **DONE** |
 | 0.6 | GitHub Actions: ruff, mypy, pytest, eslint, tsc, next build | 0.5 | TODO |
 | 0.7 | `docs/ARCHITECTURE.md` and `docs/ENVIRONMENT.md` first draft | 0.3 | TODO |
 
@@ -116,6 +116,41 @@ Points the next loops must respect:
 - `frontend/node_modules` is a named volume in compose. It is populated from the
   image on first use, so after changing dependencies the volume must be removed
   or it will serve the old tree.
+
+**0.5 notes —** Both harnesses run and both were shown to fail when the thing
+they test is genuinely broken.
+
+Commands, for task 0.6 to wire verbatim:
+
+```
+# Backend — 9 tests, needs postgres+redis up
+docker compose up -d --wait postgres redis meilisearch
+docker run --rm --network gau-textbook_gau_net --env-file .env \
+  -v "$PWD/backend:/app" -w /app gau-textbook-backend:dev pytest
+
+# End-to-end — 8 tests across two viewports, needs the whole stack up
+docker run --rm --network gau-textbook_gau_net -v "$PWD/frontend:/work" -w /work \
+  -e PLAYWRIGHT_BASE_URL=http://nginx \
+  mcr.microsoft.com/playwright:v1.63.0-noble \
+  sh -c 'npm ci && npx playwright test'
+```
+
+Points the next loops must respect:
+
+- pytest pins its own settings with `--ds=config.settings.test` in `addopts`
+  (D-018). Setting `DJANGO_SETTINGS_MODULE` in the ini section does **not**
+  work: pytest-django reads the environment first, and the container is run
+  with `--env-file .env`, so the suite silently ran under dev settings.
+- E2E has no `webServer` block and does not mock the API (D-017). It needs the
+  stack up. `PLAYWRIGHT_BASE_URL` is `http://nginx` inside the compose network,
+  `http://localhost:8080` from the host.
+- The Playwright library version and the browser image tag must be changed
+  together — currently both 1.63.0.
+- Retries are CI-only (D-019), so a flake is visible locally the moment it
+  appears rather than absorbed.
+- `tests/test_smoke.py::TestConfiguration::test_no_custom_user_model_is_declared_yet`
+  guards D-009 and **must be deleted by task 1.1** when the custom user model
+  lands — it asserts the absence that 1.1 removes.
 
 ---
 

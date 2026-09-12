@@ -333,3 +333,67 @@ routes them.
 **Consequences:** `INTERNAL_API_BASE_URL` is set in `docker-compose.yml` and
 documented in `.env.example`. Only `NEXT_PUBLIC_`-prefixed variables exist in
 the browser, so the internal URL cannot leak into the client bundle.
+
+---
+
+## D-017 — End-to-end tests run against the real stack, not a mocked backend
+
+**Date:** 2026-09-12 · **Task:** 0.5
+
+`playwright.config.ts` has no `webServer` block. The suite attaches to the
+running Docker Compose stack through Nginx, and browsers come from the official
+`mcr.microsoft.com/playwright` image pinned to the same version as
+`@playwright/test`.
+
+**Rationale:** Almost everything that can break a Canvas launch lives in the
+chain rather than in a component — cookie attributes, `SameSite=None` with
+`Secure`, forwarded proto through the proxy, iframe headers, redirect handling.
+A suite that stubbed the API would pass while launches failed in Canvas, which
+is precisely the failure Phase 1 must not ship. Pinning the browser image to the
+library version means a local run and CI exercise identical binaries, so "passes
+on my machine" is not a category of bug that can exist here.
+
+**Consequences:** E2E requires the stack to be up; it is not a unit-test
+substitute. `PLAYWRIGHT_BASE_URL` selects the entry point — `http://nginx`
+inside the compose network, `http://localhost:8080` from the host. Upgrading
+Playwright means changing the version in `package.json` and the image tag
+together.
+
+---
+
+## D-018 — The test suite pins its own settings module
+
+**Date:** 2026-09-12 · **Task:** 0.5
+
+pytest passes `--ds=config.settings.test` in `addopts` rather than setting
+`DJANGO_SETTINGS_MODULE` in the pytest ini section.
+
+**Rationale:** pytest-django reads the environment before the ini file. Because
+the backend container is run with `--env-file .env`, which sets
+`DJANGO_SETTINGS_MODULE=config.settings.dev`, the suite silently ran under
+development settings — real Redis instead of an isolated cache, lazy password
+hashing absent, Celery not eager. The command line beats both, so the suite now
+uses test settings no matter what the ambient environment says.
+
+**Consequences:** The suite cannot be pointed at another settings module by
+accident. Deliberately running it against production-like settings means
+overriding `--ds` explicitly on the command line.
+
+---
+
+## D-019 — Retries are enabled in CI only
+
+**Date:** 2026-09-12 · **Task:** 0.5
+
+Playwright retries twice in CI and not at all locally.
+
+**Rationale:** A test that passes only on retry is a broken test, and a suite
+that retries everywhere hides that fact until the behaviour it was masking
+reaches production. Locally the flake is visible the moment it appears, when the
+context to diagnose it is still in the developer's head. CI keeps retries so an
+unrelated infrastructure hiccup does not block a merge, and `trace: on-first-retry`
+means every retry produces the evidence needed to fix the underlying cause.
+
+**Consequences:** A flaky test reported by CI is treated as a defect to fix, not
+noise to absorb. `forbidOnly` is enabled in CI so a stray `test.only` cannot
+silently reduce the suite to one case.
