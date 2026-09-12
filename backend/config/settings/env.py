@@ -31,10 +31,8 @@ class ImproperlyConfigured(Exception):
     """A required environment variable is missing or cannot be parsed."""
 
 
-_MISSING = object()
-
 _TRUE = frozenset({"1", "true", "yes", "on"})
-_FALSE = frozenset({"0", "false", "no", "off", ""})
+_FALSE = frozenset({"0", "false", "no", "off"})
 
 
 def get_str(name: str, default: str | None = None) -> str | None:
@@ -57,21 +55,22 @@ def require_str(name: str) -> str:
 def get_bool(name: str, default: bool) -> bool:
     """Return a variable as a boolean.
 
-    Accepts the usual spellings in either case. An unrecognised value is an
+    Accepts the usual spellings in either case. An unset or empty variable
+    yields ``default``, matching :func:`get_str`. An unrecognised value is an
     error rather than a silent ``False`` — ``DEBUG=Ture`` must not quietly ship
     a production setting.
     """
-    raw = os.environ.get(name, _MISSING)  # type: ignore[arg-type]
-    if raw is _MISSING:
+    raw = get_str(name)
+    if raw is None:
         return default
-    value = str(raw).strip().lower()
+    value = raw.strip().lower()
     if value in _TRUE:
         return True
     if value in _FALSE:
         return False
     raise ImproperlyConfigured(
         f"Environment variable {name}={raw!r} is not a boolean. "
-        f"Use one of: {', '.join(sorted(_TRUE | _FALSE - {''}))}."
+        f"Use one of: {', '.join(sorted(_TRUE | _FALSE))}."
     )
 
 
@@ -132,7 +131,5 @@ def parse_redis_url(url: str) -> str:
     """Validate a Redis URL and return it unchanged."""
     parsed = urlparse(url)
     if parsed.scheme not in {"redis", "rediss", "unix"}:
-        raise ImproperlyConfigured(
-            f"Expected a redis:// URL, got {parsed.scheme!r} in {url!r}."
-        )
+        raise ImproperlyConfigured(f"Expected a redis:// URL, got {parsed.scheme!r} in {url!r}.")
     return url

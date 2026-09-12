@@ -10,6 +10,7 @@ belongs here and nowhere else.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from config.settings.env import (
     get_int,
@@ -205,8 +206,10 @@ REST_FRAMEWORK = {
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
-    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
-     "OPTIONS": {"min_length": 12}},
+    {
+        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
+        "OPTIONS": {"min_length": 12},
+    },
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
@@ -262,7 +265,7 @@ USE_X_FORWARDED_HOST = True
 
 LOG_LEVEL = get_str("DJANGO_LOG_LEVEL", "INFO")
 
-LOGGING = {
+LOGGING: dict[str, Any] = {
     "version": 1,
     "disable_existing_loggers": False,
     "formatters": {

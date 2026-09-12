@@ -79,6 +79,21 @@ exclude = ['migrations/']
 module = ["*.migrations.*"]
 ignore_errors = true
 
+# Celery ships no py.typed marker, so mypy will not analyse it by default.
+# follow_untyped_imports analyses it anyway, which infers real signatures rather
+# than collapsing the whole library to Any — strictly better than silencing the
+# error, and it keeps our own call sites checked.
+[[tool.mypy.overrides]]
+module = ["celery.*"]
+follow_untyped_imports = true
+
+# Celery's own API is untyped upstream, so strict mode rejects every call into
+# it. The relaxation is confined to the one module that constructs the app;
+# task modules and every other file stay fully strict, so this cannot spread.
+[[tool.mypy.overrides]]
+module = ["config.celery"]
+disable_error_code = ["no-untyped-call"]
+
 [tool.django-stubs]
 django_settings_module = "config.settings.dev"
 

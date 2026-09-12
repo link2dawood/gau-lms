@@ -397,3 +397,56 @@ means every retry produces the evidence needed to fix the underlying cause.
 **Consequences:** A flaky test reported by CI is treated as a defect to fix, not
 noise to absorb. `forbidOnly` is enabled in CI so a stray `test.only` cannot
 silently reduce the suite to one case.
+
+---
+
+## D-020 — Migrations are an explicit step, not a container-start side effect
+
+**Date:** 2026-09-12 · **Task:** 0.6
+
+The compose `backend` service runs Gunicorn only. Schema changes are applied by
+running the command deliberately:
+
+```
+docker compose run --rm backend python manage.py migrate
+```
+
+**Rationale:** Migrating on start means every replica races to migrate the same
+database during a rolling deploy, and nobody decides *when* a schema change
+lands — it happens whenever a container restarts, including an automatic
+restart at 3am. Content versioning makes this sharper than usual: an
+in-flight publish and a concurrent migration touching `ContentVersion` is not a
+situation worth discovering in production.
+
+**Consequences:** A fresh environment needs the migrate command before it will
+serve content. The deployment procedure in task 4.8 runs migrations as a named
+step, and the CI end-to-end job brings the stack up without one — which is why
+the whole stack could be started and verified in 0.6 while D-009 still holds and
+no migration has been applied. The backend also gained a healthcheck on
+`/api/live/`, so Nginx waits for a backend that is serving rather than one that
+has merely started.
+
+---
+
+## D-021 — End-to-end tests run against the production frontend build
+
+**Date:** 2026-09-12 · **Task:** 0.6
+
+`docker-compose.yml` builds the frontend `prod` target.
+`docker-compose.override.yml`, which Compose loads automatically, swaps in the
+dev server for local work. CI and any faithful run pass `-f docker-compose.yml`
+to bypass it.
+
+**Rationale:** The first end-to-end run against the dev server reported two
+flaky tests. The cause was not a race: Next compiles routes on first request in
+development, and a cold `/_not-found` took **29.1 seconds** against a 30-second
+test timeout. That is not a timing the deployed platform ever has, so the suite
+was measuring a property of the dev server rather than of the product. Retrying
+would have hidden it — which is exactly what D-019 says not to do. Running
+against the production build removed the flakiness entirely and cut the suite
+from 51.6s to 9.4s.
+
+**Consequences:** `docker compose up` gives a developer fast refresh; `docker
+compose -f docker-compose.yml up` gives the shipping artefact. Anything
+asserting on timing or on built output must use the latter. The base file is now
+the deployable shape, which is also what task 4.8 extends.

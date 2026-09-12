@@ -7,7 +7,7 @@ not optional or overridable to something weaker.
 
 from __future__ import annotations
 
-from config.settings.base import *  # noqa: F403
+from config.settings.base import *
 from config.settings.env import ImproperlyConfigured, get_bool, get_int, get_list, get_str
 
 DEBUG = False
@@ -56,8 +56,8 @@ CSRF_COOKIE_HTTPONLY = False  # the frontend must read the token to send it back
 # Hashed filenames with a manifest, so Nginx can cache static assets
 # indefinitely (docker/nginx/conf.d/app.conf).
 
-STORAGES = {  # noqa: F405
-    **STORAGES,  # noqa: F405
+STORAGES = {
+    **STORAGES,
     "staticfiles": {
         "BACKEND": "django.contrib.staticfiles.storage.ManifestStaticFilesStorage",
     },

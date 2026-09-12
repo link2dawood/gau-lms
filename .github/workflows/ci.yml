@@ -1,0 +1,197 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A new push to the same branch cancels the previous run: the older result is
+# about to be irrelevant, and e2e minutes are the expensive ones.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: '3.12'
+  NODE_VERSION: '20'
+  # Must match @playwright/test in frontend/package.json. Changing one without
+  # the other means CI runs browsers the library was not tested against.
+  PLAYWRIGHT_VERSION: '1.63.0'
+
+jobs:
+  # ---------------------------------------------------------------------------
+  backend:
+    name: Backend — ruff, mypy, pytest
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: gau_textbook
+          POSTGRES_USER: gau
+          POSTGRES_PASSWORD: ci-postgres-password
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U gau -d gau_textbook"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+      redis:
+        image: redis:7.2-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 12
+
+    env:
+      # Configuration only. Every value is a throwaway for this run; nothing
+      # here is a credential for any real environment.
+      DJANGO_SECRET_KEY: ci-secret-key-not-used-outside-this-job
+      DATABASE_URL: postgres://gau:ci-postgres-password@localhost:5432/gau_textbook
+      REDIS_CACHE_URL: redis://localhost:6379/0
+      CELERY_BROKER_URL: redis://localhost:6379/1
+      CELERY_RESULT_BACKEND: redis://localhost:6379/2
+      LTI_STATE_REDIS_URL: redis://localhost:6379/3
+      MEILISEARCH_URL: http://localhost:7700
+      MEILI_MASTER_KEY: ci-meili-master-key-not-used-outside
+      PLATFORM_BASE_URL: http://localhost:8080
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,testserver
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install dependencies
+        working-directory: backend
+        run: pip install ".[dev]"
+
+      - name: ruff — lint
+        working-directory: backend
+        run: ruff check --output-format=github .
+
+      - name: ruff — format
+        working-directory: backend
+        run: ruff format --check .
+
+      # mypy's Django plugin imports the settings module, so it needs the same
+      # environment the application does. A missing variable fails here as a
+      # plugin crash rather than a type error, which is confusing to debug.
+      - name: mypy — strict type check
+        working-directory: backend
+        run: mypy .
+
+      - name: pytest
+        working-directory: backend
+        run: pytest --cov=config --cov=apps --cov-report=term-missing
+
+  # ---------------------------------------------------------------------------
+  frontend:
+    name: Frontend — eslint, tsc, build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: ESLint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: TypeScript
+        working-directory: frontend
+        run: npm run typecheck
+
+      # NODE_ENV must be production here. Building with NODE_ENV=development
+      # makes Next mix dev and production React runtimes, and prerendering fails
+      # with a useContext error that looks like an application bug.
+      - name: Production build
+        working-directory: frontend
+        env:
+          NODE_ENV: production
+          NEXT_TELEMETRY_DISABLED: '1'
+        run: npm run build
+
+  # ---------------------------------------------------------------------------
+  e2e:
+    name: End-to-end — Playwright against the real stack
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The e2e suite deliberately does not mock the API (DECISIONS.md D-017):
+      # cookie attributes, forwarded proto and iframe headers only exist when
+      # the whole chain is present, and those are what break a Canvas launch.
+      - name: Create environment file
+        run: |
+          cp .env.example .env
+          python3 - <<'PY'
+          import pathlib, secrets
+          p = pathlib.Path('.env'); s = p.read_text()
+          s = s.replace('POSTGRES_PASSWORD=change-me-before-first-run',
+                        'POSTGRES_PASSWORD=ci-postgres-password')
+          s = s.replace('postgres://gau:change-me-before-first-run@',
+                        'postgres://gau:ci-postgres-password@')
+          s = s.replace('MEILI_MASTER_KEY=change-me-before-first-run',
+                        f'MEILI_MASTER_KEY={secrets.token_urlsafe(32)}')
+          s = s.replace('DJANGO_SECRET_KEY=change-me-before-first-run',
+                        f'DJANGO_SECRET_KEY={secrets.token_urlsafe(64)}')
+          p.write_text(s)
+          PY
+
+      # -f docker-compose.yml deliberately bypasses docker-compose.override.yml:
+      # the override swaps in the Next.js dev server, which compiles routes on
+      # first request and is not a timing the deployed platform ever has.
+      # End-to-end must exercise the production build. See DECISIONS.md D-021.
+      - name: Build images
+        run: docker compose -f docker-compose.yml build backend frontend
+
+      - name: Start the stack
+        run: docker compose -f docker-compose.yml up -d --wait
+
+      - name: Run Playwright
+        run: |
+          docker run --rm \
+            --network gau-textbook_gau_net \
+            -v "${{ github.workspace }}/frontend:/work" -w /work \
+            -e PLAYWRIGHT_BASE_URL=http://nginx \
+            -e CI=true \
+            mcr.microsoft.com/playwright:v${{ env.PLAYWRIGHT_VERSION }}-noble \
+            sh -c 'npm ci --no-audit --fund=false && npx playwright test'
+
+      - name: Collect service logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.yml logs --no-color --tail=200
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f docker-compose.yml down -v

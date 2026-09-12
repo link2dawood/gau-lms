@@ -105,15 +105,29 @@ services:
     <<: *backend-image
     # Gunicorn in every environment, with --reload locally, so the process that
     # serves development is the process that serves production.
+    #
+    # Migrations are NOT run here. Applying schema changes as a side effect of
+    # container start means several replicas race to migrate the same database
+    # during a rolling deploy, and nobody chooses when a schema change lands.
+    # It is an explicit step instead:
+    #
+    #     docker compose run --rm backend python manage.py migrate
+    #
+    # See DECISIONS.md D-020.
     command: >
-      sh -c "python manage.py migrate --noinput &&
-             gunicorn config.wsgi:application
-               --bind 0.0.0.0:8000
-               --workers ${GUNICORN_WORKERS:-2}
-               --timeout ${GUNICORN_TIMEOUT:-60}
-               --access-logfile - --error-logfile -
-               --reload"
+      gunicorn config.wsgi:application
+        --bind 0.0.0.0:8000
+        --workers ${GUNICORN_WORKERS:-2}
+        --timeout ${GUNICORN_TIMEOUT:-60}
+        --access-logfile - --error-logfile -
+        --reload
     expose: ["8000"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/live/"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
 
   celery_worker:
     <<: *backend-image
@@ -134,22 +148,21 @@ services:
       redis: {condition: service_healthy}
       backend: {condition: service_started}
 
+  # Production build by default, so `docker compose up` and CI exercise what
+  # actually ships. docker-compose.override.yml swaps in the dev server for
+  # local work and is loaded automatically — see DECISIONS.md D-021.
   frontend:
     build:
       context: .
       dockerfile: docker/frontend.Dockerfile
-      target: dev
-    image: gau-textbook-frontend:dev
+      target: prod
+    image: gau-textbook-frontend:prod
     env_file: [.env]
     environment:
       # Server-side calls go over the private network; browser calls go through
       # Nginx on the public origin.
       INTERNAL_API_BASE_URL: http://backend:8000
-    volumes:
-      - ./frontend:/app
-      - frontend_node_modules:/app/node_modules
-      - frontend_next_cache:/app/.next
-    command: npm run dev
+      NODE_ENV: production
     expose: ["3000"]
     restart: unless-stopped
     networks: [gau_net]
@@ -166,7 +179,7 @@ services:
     ports:
       - "${HTTP_PORT:-8080}:80"
     depends_on:
-      backend: {condition: service_started}
+      backend: {condition: service_healthy}
       frontend: {condition: service_started}
     healthcheck:
       test: ["CMD", "nginx", "-t"]
@@ -183,7 +196,6 @@ volumes:
   static_files:
   media_files:
   frontend_node_modules:
-  frontend_next_cache:
 
 networks:
   gau_net:

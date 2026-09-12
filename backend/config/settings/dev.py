@@ -7,7 +7,7 @@ search engine are the same as deployed, so a launch bug reproduces locally.
 
 from __future__ import annotations
 
-from config.settings.base import *  # noqa: F403
+from config.settings.base import *
 from config.settings.env import get_bool, get_list
 
 DEBUG = get_bool("DJANGO_DEBUG", True)
@@ -31,4 +31,4 @@ CSRF_TRUSTED_ORIGINS = get_list(
 # Full SQL in the console when explicitly asked for; off by default because the
 # reader issues many small queries and the noise buries everything else.
 if get_bool("DJANGO_LOG_SQL", False):
-    LOGGING["loggers"]["django.db.backends"]["level"] = "DEBUG"  # noqa: F405
+    LOGGING["loggers"]["django.db.backends"]["level"] = "DEBUG"

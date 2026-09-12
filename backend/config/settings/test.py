@@ -7,7 +7,7 @@ that make a suite fast and deterministic.
 
 from __future__ import annotations
 
-from config.settings.dev import *  # noqa: F403
+from config.settings.dev import *
 
 DEBUG = False
 
@@ -30,4 +30,4 @@ CACHES = {
 }
 SESSION_ENGINE = "django.contrib.sessions.backends.db"
 
-LOGGING["root"]["level"] = "WARNING"  # noqa: F405
+LOGGING["root"]["level"] = "WARNING"

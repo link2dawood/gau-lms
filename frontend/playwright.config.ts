@@ -30,7 +30,11 @@ export default defineConfig({
   // A test that only passes on a retry is a broken test. Locally there are no
   // retries, so flakiness is visible immediately instead of being absorbed.
   retries: isCI ? 2 : 0,
-  workers: isCI ? 2 : undefined,
+  // Spread rather than `workers: isCI ? 2 : undefined`: under
+  // exactOptionalPropertyTypes an explicit `undefined` is not the same as an
+  // absent key, and Playwright's own types reject it. Omitting the key is what
+  // actually means "use the default".
+  ...(isCI ? { workers: 2 } : {}),
   forbidOnly: isCI,
 
   reporter: isCI

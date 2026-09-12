@@ -19,9 +19,7 @@ urlpatterns = [
     # Operational. Unauthenticated by design; see config/health.py.
     path("api/health/", health, name="health"),
     path("api/live/", liveness, name="liveness"),
-
     path("admin/", admin.site.urls),
-
     # Mounted by their tasks:
     #   path("lti/", include("apps.lti.urls")),           task 1.3
     #   path("api/", include("apps.content.urls")),       task 2.6

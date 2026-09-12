@@ -7,7 +7,7 @@ A task is `DONE` only when a passing test or a verified command proved it.
 A task is `BLOCKED` with the specific question recorded inline, so the next loop
 does not repeat the work.
 
-**Current status:** Stage 0 in progress. Next task: **0.6**.
+**Current status:** Stage 0 complete apart from 0.7. Next task: **0.7**.
 
 ---
 
@@ -20,7 +20,7 @@ does not repeat the work.
 | 0.3 | Django project with split settings, `.env.example` listing every variable | 0.2 | **DONE** |
 | 0.4 | Next.js 14 app with TypeScript, Tailwind, path aliases, typed API client shell | 0.2 | **DONE** |
 | 0.5 | pytest and Playwright configured, one smoke test each | 0.3, 0.4 | **DONE** |
-| 0.6 | GitHub Actions: ruff, mypy, pytest, eslint, tsc, next build | 0.5 | TODO |
+| 0.6 | GitHub Actions: ruff, mypy, pytest, eslint, tsc, next build | 0.5 | **DONE** |
 | 0.7 | `docs/ARCHITECTURE.md` and `docs/ENVIRONMENT.md` first draft | 0.3 | TODO |
 
 **0.1 notes —** Repository root is the project root (no nested `gau-textbook/`
@@ -151,6 +151,42 @@ Points the next loops must respect:
 - `tests/test_smoke.py::TestConfiguration::test_no_custom_user_model_is_declared_yet`
   guards D-009 and **must be deleted by task 1.1** when the custom user model
   lands — it asserts the absence that 1.1 removes.
+
+**0.6 notes —** `.github/workflows/ci.yml` with three jobs: `backend`
+(ruff lint, ruff format, mypy strict, pytest with coverage, against postgres and
+redis service containers), `frontend` (eslint, tsc, production build), and `e2e`
+(needs both; brings the real stack up and runs Playwright, uploading the report
+as an artefact).
+
+ruff and mypy ran for the first time here and found 11 issues, all fixed. The
+whole compose stack also came up for the first time — 8/8 services healthy.
+
+**The workflow itself has not run on GitHub.** `gh` auth on this machine is
+broken (keyring), so no Actions run could be triggered. Every gate was executed
+locally under CI-identical invocations and the YAML was parsed and its job graph
+checked, but *that the workflow triggers and passes on GitHub is unverified
+until the branch is pushed.* First push should confirm it before 0.7 is
+accepted as safe to build on.
+
+Points the next loops must respect:
+
+- **Migrations are no longer run on container start** (D-020). A fresh
+  environment needs `docker compose run --rm backend python manage.py migrate`.
+  Task 1.1 runs it for the first time — and must confirm `django_migrations` is
+  empty beforehand, which it still is (verified: 0 tables in `public`).
+- **`docker compose up` is not what CI runs** (D-021). It loads
+  `docker-compose.override.yml` and gives the Next dev server. CI uses
+  `docker compose -f docker-compose.yml up`, the production build. Anything
+  asserting on timing or built output must use the latter.
+- mypy needs the application environment because its Django plugin imports the
+  settings module. A missing variable surfaces as a plugin crash, not a type
+  error. The CI job sets throwaway values for exactly this reason.
+- The `backend` CI job has **no meilisearch service** — nothing tests against it
+  yet. Task **2.12** must add one when indexing tests land, or they will fail
+  with a connection error rather than an assertion.
+- `config.celery` is the one module with `no-untyped-call` disabled, because
+  Celery ships no type information. Verified not to leak: the same call in
+  another module still errors.
 
 ---
 
