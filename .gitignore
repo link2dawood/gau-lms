@@ -1,0 +1,122 @@
+# ---------------------------------------------------------------------------
+# Python / Django (backend/)
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Django
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# Collected/served assets and uploads (never committed; see DEPLOYMENT.md)
+backend/staticfiles/
+backend/media/
+backend/mediafiles/
+
+# Test / coverage / type-check caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+nosetests.xml
+.tox/
+.hypothesis/
+
+# ---------------------------------------------------------------------------
+# Node / Next.js (frontend/)
+# ---------------------------------------------------------------------------
+node_modules/
+.next/
+out/
+.turbo/
+*.tsbuildinfo
+next-env.d.ts
+.eslintcache
+.pnpm-store/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Playwright
+test-results/
+playwright-report/
+playwright/.cache/
+blob-report/
+
+# ---------------------------------------------------------------------------
+# Environment and secrets
+#   .env.example IS committed; every real .env file is not.
+#   LTI tool private keys are secrets and never enter the repository.
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+!**/fixtures/**/*.example.pem
+secrets/
+
+# ---------------------------------------------------------------------------
+# Docker / local infrastructure volumes
+# ---------------------------------------------------------------------------
+docker-compose.override.yml
+.docker/
+data/
+volumes/
+postgres-data/
+meili-data/
+redis-data/
+
+# ---------------------------------------------------------------------------
+# Celery
+# ---------------------------------------------------------------------------
+celerybeat-schedule
+celerybeat-schedule.*
+celerybeat.pid
+
+# ---------------------------------------------------------------------------
+# Editors and OS
+# ---------------------------------------------------------------------------
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ---------------------------------------------------------------------------
+# Local scratch
+# ---------------------------------------------------------------------------
+scratch/
+tmp/
