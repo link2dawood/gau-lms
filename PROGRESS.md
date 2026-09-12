@@ -7,7 +7,7 @@ A task is `DONE` only when a passing test or a verified command proved it.
 A task is `BLOCKED` with the specific question recorded inline, so the next loop
 does not repeat the work.
 
-**Current status:** Stage 0 complete apart from 0.7. Next task: **0.7**.
+**Current status:** Stage 0 complete. Next task: **1.1**.
 
 ---
 
@@ -21,7 +21,7 @@ does not repeat the work.
 | 0.4 | Next.js 14 app with TypeScript, Tailwind, path aliases, typed API client shell | 0.2 | **DONE** |
 | 0.5 | pytest and Playwright configured, one smoke test each | 0.3, 0.4 | **DONE** |
 | 0.6 | GitHub Actions: ruff, mypy, pytest, eslint, tsc, next build | 0.5 | **DONE** |
-| 0.7 | `docs/ARCHITECTURE.md` and `docs/ENVIRONMENT.md` first draft | 0.3 | TODO |
+| 0.7 | `docs/ARCHITECTURE.md` and `docs/ENVIRONMENT.md` first draft | 0.3 | **DONE** |
 
 **0.1 notes —** Repository root is the project root (no nested `gau-textbook/`
 directory); `backend/`, `frontend/`, `docs/` sit directly at the top level. See
@@ -187,6 +187,45 @@ Points the next loops must respect:
 - `config.celery` is the one module with `no-untyped-call` disabled, because
   Celery ships no type information. Verified not to leak: the same call in
   another module still errors.
+
+**0.7 notes —** `docs/ARCHITECTURE.md` covers the system, request paths
+(page load and Canvas launch), module boundaries, the ten architecture rules
+each paired with the failure it prevents, the content model, frontend, background
+work, testing and later-phase attachment points. `docs/ENVIRONMENT.md` documents
+all 42 variables with defaults and consequences. Anything not yet built is marked
+with the task that builds it. A root `README.md` points at both.
+
+`scripts/check_env_docs.py` compares what the settings, Compose and the frontend
+read against `.env.example` and fails on drift; it is now a step in the backend
+CI job. Verified at 42 read, 42 declared, no drift.
+
+Writing ENVIRONMENT.md surfaced a real defect from 0.3: `DATA_UPLOAD_MAX_MEMORY_SIZE`
+had been raised to 64 MB to allow large document imports, but that setting
+excludes file uploads entirely. It enabled nothing and widened a DoS surface for
+JSON bodies. Corrected to 10 MB (D-022).
+
+**Owed when Docker testing resumes — run these first:**
+
+Docker is paused at the user's request, so the following change is verified only
+at host level (AST parse and default value extraction), not by the suite:
+
+- `backend/config/settings/base.py` — `DATA_UPLOAD_MAX_MEMORY_SIZE` default
+  64 MB → 10 MB. Run `ruff check`, `ruff format --check`, `mypy .` and `pytest`
+  in the backend image. Low risk (an integer default no test asserts on), but
+  unverified by the toolchain.
+- `.github/workflows/ci.yml` — new `.env.example matches the code` step. YAML
+  re-parsed with host Ruby; still never run on GitHub (see 0.6).
+
+Points the next loops must respect:
+
+- **Task 3.10 and 3.11 must enforce upload size in validation.** Neither Django
+  upload setting limits a file's size, and the settings file will tempt a reader
+  to assume otherwise (D-022).
+- Adding or removing a setting now fails CI unless `.env.example` changes in the
+  same commit. Update `docs/ENVIRONMENT.md` alongside it.
+- ARCHITECTURE.md marks module status explicitly. When a task builds a module,
+  update its row from a task number to built — a doc claiming something is
+  "task 2.1" after it ships is as misleading as one claiming it is built before.
 
 ---
 

@@ -239,9 +239,20 @@ STORAGES = {
     "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
 }
 
-# Imported source documents are the largest uploads accepted. Kept in step with
-# client_max_body_size in docker/nginx/nginx.conf.
-DATA_UPLOAD_MAX_MEMORY_SIZE = get_int("DATA_UPLOAD_MAX_MEMORY_SIZE", 64 * 1024 * 1024)
+# Two different limits that are easy to conflate:
+#
+# DATA_UPLOAD_MAX_MEMORY_SIZE caps the NON-FILE part of a request body — JSON,
+# form fields. It does not apply to uploaded files at all. The largest
+# legitimate non-file body is a Tiptap JSON document for one section, so 10 MB
+# is generous; anything larger is refused before it is read into memory.
+#
+# FILE_UPLOAD_MAX_MEMORY_SIZE is the point at which an uploaded file is streamed
+# to disk instead of held in memory. It is not a size limit either.
+#
+# The ceiling on an uploaded document is client_max_body_size in
+# docker/nginx/nginx.conf (64 MB). Per-type size validation for images and
+# imports is owed in tasks 3.10 and 3.11.
+DATA_UPLOAD_MAX_MEMORY_SIZE = get_int("DATA_UPLOAD_MAX_MEMORY_SIZE", 10 * 1024 * 1024)
 FILE_UPLOAD_MAX_MEMORY_SIZE = get_int("FILE_UPLOAD_MAX_MEMORY_SIZE", 10 * 1024 * 1024)
 
 # ---------------------------------------------------------------------------

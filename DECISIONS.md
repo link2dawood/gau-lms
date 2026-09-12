@@ -450,3 +450,29 @@ from 51.6s to 9.4s.
 compose -f docker-compose.yml up` gives the shipping artefact. Anything
 asserting on timing or on built output must use the latter. The base file is now
 the deployable shape, which is also what task 4.8 extends.
+
+---
+
+## D-022 — Upload size is limited at the edge and per type, not by Django's upload settings
+
+**Date:** 2026-09-12 · **Task:** 0.7 · *Corrects a mistaken rationale from 0.3*
+
+`DATA_UPLOAD_MAX_MEMORY_SIZE` is 10 MB. The ceiling on an uploaded file is
+`client_max_body_size` in `docker/nginx/nginx.conf` (64 MB). Per-type limits for
+images and document imports are enforced by validation in tasks 3.10 and 3.11.
+
+**Rationale:** Task 0.3 raised `DATA_UPLOAD_MAX_MEMORY_SIZE` to 64 MB on the
+reasoning that imported documents are the largest uploads. That was wrong, and
+checking Django's source while writing `docs/ENVIRONMENT.md` showed it: the
+setting caps the **non-file** part of a request body — JSON and form fields — and
+explicitly excludes uploaded files. So the 64 MB value never enabled a single
+large import. What it did do was let a *JSON* body reach 64 MB before being
+refused, widening a denial-of-service surface for no benefit.
+`FILE_UPLOAD_MAX_MEMORY_SIZE` is not a limit either; it is only the point at which
+an upload spills from memory to disk.
+
+**Consequences:** The largest legitimate non-file body is a Tiptap JSON document
+for one section, which 10 MB comfortably covers. Tasks 3.10 and 3.11 must enforce
+their own size limits in validation, because neither Django setting will stop an
+oversized image or import — and a reader of the settings file would reasonably,
+and wrongly, assume one of them does. The comment in `base.py` now says so.

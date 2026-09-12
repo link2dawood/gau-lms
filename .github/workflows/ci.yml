@@ -73,6 +73,11 @@ jobs:
         working-directory: backend
         run: pip install ".[dev]"
 
+      # Configuration docs rot silently: a setting is added in code and never
+      # reaches .env.example, so the next environment discovers it as a crash.
+      - name: .env.example matches the code
+        run: python3 scripts/check_env_docs.py
+
       - name: ruff — lint
         working-directory: backend
         run: ruff check --output-format=github .
