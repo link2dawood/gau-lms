@@ -159,3 +159,115 @@ launch that is already in progress. Separate logical databases make
 
 **Consequences:** Any new Redis use declares which logical database it belongs
 to and adds its own URL setting. `FLUSHALL` is never used.
+
+---
+
+## D-009 — The custom user model and the first migration land together in task 1.1
+
+**Date:** 2026-09-12 · **Task:** 0.3 · *Revised during 0.3 verification*
+
+`AUTH_USER_MODEL` is **not** set in task 0.3, and **no migration has been
+applied to any database**. Task 1.1 creates `apps.accounts.User`, sets
+`AUTH_USER_MODEL`, and generates the first migration as one change.
+
+**Rationale:** Canvas is the authority for identity (rule C.5), so the
+platform's user record carries Canvas fields — `canvas_user_id`, the role
+flags — and was never going to be Django's default model. Django bakes the
+resolved user model into `django.contrib.auth`'s migration state at the first
+`migrate`, so swapping it afterwards is a data migration rather than a setting.
+
+The first attempt at this declared `AUTH_USER_MODEL = "accounts.User"` in 0.3
+and deferred only the migration. That does not work: Django resolves the
+setting eagerly during system checks, so `manage.py check` fails with
+*"AUTH_USER_MODEL refers to model 'accounts.User' that has not been installed"*
+and the project cannot be verified as booting at all. The setting and the model
+must appear together.
+
+**Consequences:**
+
+- Task 0.3 is verified with `manage.py check` and direct connectivity probes,
+  never `migrate`.
+- The compose `backend` service runs `migrate` on start, so it is **not brought
+  up until task 1.1**. This is the practical guard: there is no running process
+  that can migrate by accident before the model exists.
+- Task 1.1 must set `AUTH_USER_MODEL` in `config/settings/base.py` and create
+  `apps/accounts/migrations/0001_initial.py` in the same commit, and must
+  confirm `django_migrations` was empty beforehand.
+
+---
+
+## D-010 — The Django project is imported from PYTHONPATH, not installed
+
+**Date:** 2026-09-12 · **Task:** 0.3
+
+`backend/pyproject.toml` declares `py-modules = []`. It is the dependency
+manifest and the configuration file for ruff, mypy and pytest; it does not
+package `config` and `apps`. Those are importable because the image sets
+`PYTHONPATH=/app` and the source is bind-mounted there.
+
+**Rationale:** The Dockerfile copies only `pyproject.toml` before installing, so
+the dependency layer stays cached until dependencies actually change — a source
+edit does not trigger a reinstall. An editable install would need the package
+directories present at that point, which would mean copying the source in and
+losing the cache. A Django project is an application, not a library; nothing
+ever imports it from outside itself.
+
+**Consequences:** `pip install ".[dev]"` installs dependencies only. Adding a
+dependency means editing `pyproject.toml`, which correctly busts the layer.
+
+---
+
+## D-011 — Environment is read through a typed stdlib reader, not a library
+
+**Date:** 2026-09-12 · **Task:** 0.3
+
+`config/settings/env.py` provides `require_str`, `get_str`, `get_bool`,
+`get_int`, `get_list`, `parse_database_url` and `parse_redis_url`, built on
+`os.environ` and `urllib.parse`.
+
+**Rationale:** Section B fixes the stack and forbids adding dependencies
+quietly. Nothing here needs `django-environ` or `pydantic-settings`. The value
+that matters is behavioural, not ergonomic: a missing required variable raises
+at import naming the variable, and an unparseable boolean is an error rather
+than a silent `False` — so `DJANGO_DEBUG=Ture` fails loudly instead of shipping
+a production setting that looks correct.
+
+**Consequences:** Every setting is read through this module. Introducing a
+setting means adding it here and to `.env.example` in the same PR.
+
+---
+
+## D-012 — REST framework defaults to deny
+
+**Date:** 2026-09-12 · **Task:** 0.3
+
+`DEFAULT_PERMISSION_CLASSES = ["rest_framework.permissions.IsAuthenticated"]`.
+
+**Rationale:** Architecture rule C.8 requires every endpoint to be authorised
+and every request course-scoped. Defaulting to `AllowAny` — DRF's own default —
+means a view that forgets its permission class is silently public. Defaulting to
+deny means the same mistake produces a 403 in testing rather than an exposure in
+production.
+
+**Consequences:** The readiness endpoints in `config/health.py` are the only
+deliberate exception, because a load balancer cannot present a Canvas session.
+They are plain Django views, they touch no domain data, and they return no
+version, hostname or error detail. The access-control audit in task 4.3
+enumerates every route and asserts this.
+
+---
+
+## D-013 — Celery queues are separated by cost
+
+**Date:** 2026-09-12 · **Task:** 0.3
+
+Routes declared up front: `imports`, `indexing`, `canvas`, and `default`.
+
+**Rationale:** These jobs have wildly different durations. Converting a 338-page
+PDF runs for minutes; reindexing a section after an administrator hits Publish
+should be near-immediate. On one queue the import blocks the reindex, and the
+administrator sees stale search results with no explanation.
+
+**Consequences:** Task modules live at `apps.<module>.tasks` so the routing
+patterns match without per-task decoration. Production runs a worker per queue
+with its own concurrency (task 4.8).

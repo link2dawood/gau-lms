@@ -7,7 +7,7 @@ A task is `DONE` only when a passing test or a verified command proved it.
 A task is `BLOCKED` with the specific question recorded inline, so the next loop
 does not repeat the work.
 
-**Current status:** Stage 0 in progress. Next task: **0.3**.
+**Current status:** Stage 0 in progress. Next task: **0.4**.
 
 ---
 
@@ -17,7 +17,7 @@ does not repeat the work.
 |---|---|---|---|
 | 0.1 | Git repo, `.gitignore`, branch strategy, PR template `[micro]` | — | **DONE** |
 | 0.2 | Docker Compose: postgres, redis, meilisearch, backend, frontend, celery worker, celery beat, nginx | 0.1 | **DONE** |
-| 0.3 | Django project with split settings, `.env.example` listing every variable | 0.2 | TODO |
+| 0.3 | Django project with split settings, `.env.example` listing every variable | 0.2 | **DONE** |
 | 0.4 | Next.js 14 app with TypeScript, Tailwind, path aliases, typed API client shell | 0.2 | TODO |
 | 0.5 | pytest and Playwright configured, one smoke test each | 0.3, 0.4 | TODO |
 | 0.6 | GitHub Actions: ruff, mypy, pytest, eslint, tsc, next build | 0.5 | TODO |
@@ -54,6 +54,38 @@ Carried forward to the next loops:
 - Named volumes `pg_data`, `redis_data`, `meili_data` persist across `down`.
 - BuildKit image builds hit a transient `deb.debian.org` fetch failure once and
   succeeded unchanged on retry; not a configuration fault.
+
+**0.3 notes —** Django 5.2 LTS project at `backend/`. Settings split four ways:
+`env.py` (typed stdlib reader, D-011), `base.py`, `dev.py`, `prod.py`, plus
+`test.py` for the suite in 0.5. `config/` holds urls, wsgi, asgi, celery and the
+readiness endpoint; `apps/` is an empty namespace each module joins with its own
+task, listed commented-out in `LOCAL_APPS` so the intended set is visible.
+
+Points the next loops must respect:
+
+- **No migration has been run against any database.** `AUTH_USER_MODEL` points
+  at `accounts.User`, which task **1.1** creates; the first `migrate` happens
+  there (DECISIONS.md D-009). The compose `backend` service migrates on start,
+  so it is not brought up until 1.1.
+- DRF **defaults to `IsAuthenticated`** (D-012). A view that forgets its
+  permission class fails closed. `/api/health/` and `/api/live/` are the only
+  unauthenticated routes and are plain Django views returning no detail.
+- Production settings **refuse to start** without `DJANGO_ALLOWED_HOSTS`,
+  `DJANGO_CSRF_TRUSTED_ORIGINS`, or with `MEILI_ENV` other than `production`.
+- Celery queues `imports`, `indexing`, `canvas`, `default` are routed by module
+  path (D-013), so task modules must live at `apps.<module>.tasks`.
+- `.env.example` now carries 41 variables. Any new setting is added there in the
+  same PR that reads it.
+
+**Found during 0.2/0.3 verification, for task 4.8:** Nginx resolves upstream
+hostnames once at startup and refuses to start if either is unresolvable, so a
+restart while the frontend container is down takes `/api/` and `/lti/` down with
+it even though the backend is healthy. Compose gates this with `depends_on` and
+restarts on failure, so the window is narrow, but for an LTI tool a failed
+launch is expensive. 4.8 should proxy through a variable with a `resolver`,
+deferring resolution to request time — which costs upstream keepalive, so the
+trade belongs with the production deployment. Documented in
+`docker/nginx/conf.d/app.conf`.
 
 ---
 

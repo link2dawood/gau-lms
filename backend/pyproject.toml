@@ -1,0 +1,90 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gau-textbook-backend"
+version = "0.1.0"
+description = "GAU Interactive Textbook Platform — Django backend"
+requires-python = "==3.12.*"
+
+# Runtime dependencies. Every entry maps to a layer in the fixed technology
+# stack; nothing outside it is added without an approved decision.
+dependencies = [
+    "django>=5.2,<6.0",              # 5.2 LTS
+    "djangorestframework>=3.15,<4.0",
+    "psycopg[binary]>=3.2,<4.0",     # PostgreSQL driver
+    "celery[redis]>=5.4,<6.0",       # background jobs
+    "redis>=5.0,<7.0",               # cache, LTI state, Celery transport
+    "gunicorn>=23.0,<24.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2,<9.0",
+    "pytest-django>=4.8,<5.0",
+    "pytest-cov>=5.0,<7.0",
+    "factory-boy>=3.3,<4.0",
+    "ruff>=0.6,<1.0",
+    "mypy>=1.11,<2.0",
+    "django-stubs[compatible-mypy]>=5.0,<6.0",
+    "djangorestframework-stubs>=3.15,<4.0",
+]
+
+# The Django project is not installed as a package: `config` and `apps` are
+# imported from PYTHONPATH=/app (see docker/backend.Dockerfile and
+# DECISIONS.md D-010). This file is the dependency manifest and tool
+# configuration only.
+[tool.setuptools]
+py-modules = []
+
+# --------------------------------------------------------------------- ruff
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = ["**/migrations/*"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",   # pycodestyle
+    "F",        # pyflakes
+    "I",        # import ordering
+    "UP",       # pyupgrade
+    "B",        # bugbear
+    "DJ",       # flake8-django
+    "S",        # bandit security checks
+    "C4",       # comprehensions
+    "RUF",
+]
+ignore = [
+    "S101",  # assert is how pytest expresses assertions
+]
+
+[tool.ruff.lint.per-file-ignores]
+"**/tests/**" = ["S105", "S106"]        # test fixtures may carry literal secrets
+"config/settings/*" = ["F403", "F405"]  # settings modules star-import their base
+
+[tool.ruff.lint.isort]
+known-first-party = ["config", "apps"]
+
+# --------------------------------------------------------------------- mypy
+[tool.mypy]
+python_version = "3.12"
+plugins = ["mypy_django_plugin.main", "mypy_drf_plugin.main"]
+strict = true
+warn_unreachable = true
+exclude = ['migrations/']
+
+[[tool.mypy.overrides]]
+module = ["*.migrations.*"]
+ignore_errors = true
+
+[tool.django-stubs]
+django_settings_module = "config.settings.dev"
+
+# -------------------------------------------------------------------- pytest
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings.test"
+python_files = ["test_*.py", "*_test.py"]
+testpaths = ["tests", "apps"]
+addopts = "--strict-markers --strict-config -ra"

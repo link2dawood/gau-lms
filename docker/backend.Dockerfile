@@ -16,6 +16,10 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    # Fail and retry rather than hang indefinitely on a slow index; an image
+    # build that stalls silently is worse than one that errors.
+    PIP_DEFAULT_TIMEOUT=30 \
+    PIP_RETRIES=5 \
     PYTHONPATH=/app
 
 # System packages:
@@ -43,7 +47,7 @@ ENV DJANGO_SETTINGS_MODULE=config.settings.dev
 
 # Dependency manifest only, so the install layer is cached until it changes.
 COPY backend/pyproject.toml ./
-RUN pip install --editable ".[dev]"
+RUN pip install ".[dev]"
 
 # Source is bind-mounted over /app by compose; nothing is copied in.
 EXPOSE 8000
