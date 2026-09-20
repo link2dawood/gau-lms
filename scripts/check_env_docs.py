@@ -14,6 +14,12 @@ This compares three sources and fails if they disagree:
 
 against what .env.example declares.
 
+It also checks that the CI backend job supplies every variable the settings
+*require*. That job maintains its environment by hand rather than copying
+.env.example, so it drifts silently — and because mypy's Django plugin imports
+the settings module, a missing required variable surfaces there as a plugin
+failure rather than as the configuration error it is.
+
 Run from the repository root:
 
     python3 scripts/check_env_docs.py
@@ -52,6 +58,8 @@ COMPOSE_INTERPOLATION = re.compile(r"\$\{([A-Z0-9_]+)")
 COMPOSE_LITERAL_ENV = re.compile(r"^\s{6}([A-Z][A-Z0-9_]+):\s", re.M)
 PROCESS_ENV = re.compile(r"process\.env\.([A-Z0-9_]+)")
 DECLARATION = re.compile(r"^([A-Z][A-Z0-9_]*)=", re.M)
+REQUIRED_CALL = re.compile(r'require_str\(\s*"([A-Z0-9_]+)"')
+CI_JOB_ENV = re.compile(r"^      ([A-Z][A-Z0-9_]+):", re.M)
 
 
 def backend_variables() -> set[str]:
@@ -92,6 +100,31 @@ def declared_variables() -> set[str]:
     return set(DECLARATION.findall((ROOT / ".env.example").read_text()))
 
 
+def required_variables() -> set[str]:
+    """Variables the settings refuse to start without."""
+    found: set[str] = set()
+    for path in (ROOT / "backend" / "core" / "settings").glob("*.py"):
+        found.update(REQUIRED_CALL.findall(path.read_text()))
+    return found
+
+
+def ci_backend_variables() -> set[str]:
+    """What the CI backend job puts in the environment.
+
+    That job hand-maintains its env block instead of copying .env.example, so
+    it is the one place that can fall behind without anything saying so.
+    """
+    workflow = ROOT / ".github" / "workflows" / "ci.yml"
+    if not workflow.exists():
+        return set()
+    text = workflow.read_text()
+    start = text.find("name: Backend")
+    end = text.find("name: Frontend", start)
+    if start == -1:
+        return set()
+    return set(CI_JOB_ENV.findall(text[start : end if end != -1 else len(text)]))
+
+
 def main() -> int:
     used = (backend_variables() | compose_variables() | frontend_variables()) - NOT_OPERATOR_SUPPLIED
     declared = declared_variables()
@@ -111,11 +144,23 @@ def main() -> int:
         for name in unused:
             print(f"  {name}")
 
+    absent_from_ci = sorted(required_variables() - ci_backend_variables())
+    if absent_from_ci:
+        print("\nRequired by the settings but absent from the CI backend job:")
+        for name in absent_from_ci:
+            print(f"  {name}")
+        print(
+            "  mypy imports the settings module, so this fails there as a plugin\n"
+            "  error rather than as the missing configuration it is."
+        )
+
     if missing or unused:
         print("\n.env.example is out of step with the code. Update it, and docs/ENVIRONMENT.md.")
         return 1
+    if absent_from_ci:
+        return 1
 
-    print("\n.env.example matches the code.")
+    print("\n.env.example matches the code, and CI supplies every required variable.")
     return 0
 
 

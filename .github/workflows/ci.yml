@@ -55,6 +55,9 @@ jobs:
       CELERY_BROKER_URL: redis://localhost:6379/1
       CELERY_RESULT_BACKEND: redis://localhost:6379/2
       LTI_STATE_REDIS_URL: redis://localhost:6379/3
+      # Sessions live in their own logical database so that clearing the page
+      # cache cannot sign every reader out (DECISIONS.md D-039).
+      SESSION_REDIS_URL: redis://localhost:6379/4
       MEILISEARCH_URL: http://localhost:7700
       MEILI_MASTER_KEY: ci-meili-master-key-not-used-outside
       PLATFORM_BASE_URL: http://localhost:8080
