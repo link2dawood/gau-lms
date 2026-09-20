@@ -476,3 +476,1270 @@ for one section, which 10 MB comfortably covers. Tasks 3.10 and 3.11 must enforc
 their own size limits in validation, because neither Django setting will stop an
 oversized image or import — and a reader of the settings file would reasonably,
 and wrongly, assume one of them does. The comment in `base.py` now says so.
+
+---
+
+## D-023 — One platform account per Canvas identity, with no reader passwords
+
+**Date:** 2026-09-13 · **Task:** 1.1
+
+`accounts.User` has a UUID primary key and `canvas_user_id` as its unique login
+field. Readers are always created with an unusable password. `is_content_admin`
+is a platform permission, independent of both Canvas roles and Django admin
+access. The Django admin cannot add users, and the fields Canvas supplies are
+read-only there.
+
+**Rationale:** The "no second account" criterion is enforced by a unique
+constraint in the database, not by application logic that a later code path
+could bypass. A usable password would give readers a way in that skips Canvas,
+contradicting rule C.5. CMS access is kept separate from Canvas roles because a
+course Teacher is not automatically a textbook editor. GAU names its content
+administrators. Other modules refer to the UUID, never to the Canvas id, so a
+change in how Canvas identifies people touches one column.
+
+**Consequences:** `canvas_user_id` holds the LTI 1.3 `sub` claim for the one
+configured Canvas platform. `sub` is only unique within an issuer, so if the
+platform ever serves more than one Canvas instance, task 1.8 must change the
+constraint to (platform, sub). With a single `LtiPlatform` that does not arise
+in Phase 1. Name and email can be blank, and email is not unique, because Canvas
+privacy settings may withhold them.
+
+---
+
+## D-024 — Agreed project layout: `core/`, one place for migrations, a directory per module
+
+**Date:** 2026-09-17 · **Task:** 0.8 · *Supersedes the layout used by 0.3 to 1.1*
+
+At the client's direction the backend is arranged as:
+
+| Path | Holds |
+|---|---|
+| `backend/core/` | Settings, the environment and secrets loader, Celery, URLs, WSGI/ASGI, readiness. Formerly `backend/config/`. |
+| `backend/migrations/<app label>/` | Every module's migrations, mapped by `MIGRATION_MODULES`. |
+| `backend/apps/<module>/` | One directory per bounded module. |
+| `backend/utils/` | Shared utilities, created when the first one exists. |
+| `frontend/utils/` | The same rule on the frontend: `cn`, snippet highlighting, Tiptap builders. |
+
+**Rationale:** The client asked for this structure: a `core` directory for
+configuration, constants, database, rate limiting and the secrets loader; all
+migrations in one place; shared services in one place; a directory per module;
+utilities gathered rather than scattered; and reusable helpers instead of
+repeated logic. Gathering migrations also means the schema history of the whole
+platform reads in order, and a change spanning modules shows its migrations side
+by side in review.
+
+Done now because **no migration has ever been applied** (D-009). Moving
+`0001_initial` today costs a file move; after the first `migrate` it would mean
+rewriting recorded migration state on every environment.
+
+**Consequences:**
+
+- `MIGRATION_MODULES` must gain an entry whenever a module is added. Django does
+  not warn about a missing one — it treats the app as having no migrations and
+  creates no tables. `tests/test_structure.py` asserts this, along with the
+  absence of stray per-app `migrations/` directories, which would silently take
+  precedence.
+- Build-plan rule C.1 puts a `services.py` inside each module, while the client
+  asks for shared services in one place. These are reconciled as: a module keeps
+  its own `services.py` as its public interface, and any service used across
+  modules is re-exported from one shared package. Nothing is affected yet —
+  the first services arrive with task 1.8 — so the shared package is created
+  then rather than left empty now.
+- `backend/utils/` and constants, rate-limiting and database modules under
+  `core/` are likewise created when they hold real code. An empty directory is a
+  stub, and Section H forbids shipping those.
+
+---
+
+## D-025 — Canvas platform registrations are a file, not settings or fixtures
+
+**Date:** 2026-09-18 · **Task:** 1.2
+
+`LTI_PLATFORMS_FILE` names a JSON file listing every Canvas platform the tool
+trusts — issuer, client id, deployment ids, the three Canvas endpoint URLs and
+the `kid` of the tool key used with it. `manage.py sync_lti_platforms` reads it
+and upserts `lti.LtiPlatform` rows. Nothing about a specific Canvas appears in
+code (rule C.6), and the file is gitignored because it names an institution's
+Canvas and its developer key.
+
+**Rejected alternatives:**
+
+- *One environment variable per field.* A platform registration is seven fields,
+  and there can be more than one platform — a sandbox and production, or two
+  developer keys during a rotation. That does not fit flat environment
+  variables without inventing an indexing convention.
+- *Inline JSON in an environment variable.* Workable, but it would have been a
+  second source and therefore a second parser and a precedence rule. One source
+  has one failure mode.
+- *A Django fixture loaded with `loaddata`.* Fixtures carry primary keys and
+  replace rows wholesale, so re-loading one would change a registration's uuid
+  and orphan anything referring to it.
+
+**Consequences:**
+
+- The private key never enters the database. `tool_key_id` is a reference to a
+  key that task 1.3 generates and stores as a file; a database dump therefore
+  carries no key material.
+- A sync **never deletes**. A registration present in the database but absent
+  from the file is reported and left alone, because deleting it would silently
+  end every launch from that platform. Removal is a deliberate act, and
+  `is_active` exists so a registration can be retired without losing its
+  history.
+- A sync **refuses an empty list**. An empty file and a wrongly mounted file are
+  indistinguishable, and the wrong reading takes Canvas launches down.
+- `sync_platforms` calls `full_clean()` before writing. Field validators —
+  including the deployment id shape check — do not run on `save()`, so without
+  it a malformed registration would be stored and only fail later, at launch.
+- Deployment ids may legitimately be empty: Canvas issues one only after the
+  tool is installed, so a platform is registered first and the id added after.
+  `resolve_launch()` refuses the launch with a message naming the fix.
+
+---
+
+## D-026 — The tool's private keys are files on disk, unencrypted, and every key is published
+
+**Date:** 2026-09-18 · **Task:** 1.3
+
+`manage.py create_lti_key` writes one PKCS#8 PEM per key into
+`LTI_TOOL_KEY_DIR`, named by its `kid`, mode `0600` in a `0700` directory.
+`/lti/jwks/` publishes the public half of **every** key in that directory.
+
+**Files, not database rows.** A database dump is taken nightly, copied to a
+laptop to reproduce a bug, and restored into staging. A private key that lets
+anyone sign as this tool to Canvas must not travel that way.
+`LtiPlatform.tool_key_id` holds a reference; the key material never enters
+PostgreSQL.
+
+**Only the private half is stored.** The public key is derived from it when the
+JWKS is built, so the two cannot drift apart and there is no second file to
+keep in step.
+
+**Unencrypted on disk.** Gunicorn and the Celery worker read the key at start
+with no operator present, so a passphrase would have to be stored where the
+process can reach it unattended — beside the key, in the environment. That is
+not protection, it is a second secret guarding the first. The real protection
+is the file mode and the volume the keys sit on. If GAU later requires
+encryption at rest, the answer is a KMS or an encrypted volume, not a
+passphrase in `.env`.
+
+**Every key is published, not only the one in use.** During a rotation Canvas
+may still hold a token signed by the previous key. Dropping it from the JWKS
+the moment a new key is generated would reject that token. A key leaves the
+set when its file is deleted — a deliberate later act, never a side effect of
+generating a new one.
+
+**Consequences:**
+
+- `create_lti_key` opens with `O_EXCL`, so a `kid` collision fails rather than
+  overwriting a key and invalidating everything signed with it.
+- Assigning a key to a platform is a separate step: put the `kid` in the file
+  named by `LTI_PLATFORMS_FILE` and run `sync_lti_platforms`. Generating a key
+  therefore never rotates anything by itself.
+- An unreadable key file is logged and skipped rather than raised. Canvas
+  fetches this endpoint on its way to verifying the tool, and one corrupt file
+  must not take the working keys down with it.
+- An empty key directory serves `{"keys": []}` — a valid JWKS — with a warning
+  logged. It is not a 503, because failing the fetch can break tool
+  installation in Canvas, which is worse than an empty set Canvas can report.
+- `cryptography` is now a direct dependency. It is not a substitution for
+  anything in the fixed stack: PyLTI1p3 already pulls it in through jwcrypto,
+  so the image gains nothing new — it is declared because relying on a
+  transitive dependency for key generation is how a dependency bump becomes an
+  outage.
+- **Task 4.8 must give the key directory a persistent volume.** Locally it is
+  covered by the `./backend:/app` bind mount. On the server, without a volume,
+  recreating the container destroys every key and every Canvas registration has
+  to be re-pointed at a new one.
+
+---
+
+## D-027 — A tool key's `kid` is its RFC 7638 thumbprint, not an assigned id
+
+**Date:** 2026-09-18 · **Task:** 1.4 · *Corrects D-026, which used a random uuid*
+
+`apps/lti/keys.py` names each key file by the JWK thumbprint of the key it
+holds: SHA-256 over `{"e":…,"kty":"RSA","n":…}` with members in lexicographic
+order and no whitespace, base64url without padding.
+
+**Why the correction.** D-026 assigned each key a random uuid. Reading the
+PyLTI1p3 source while building 1.4 showed why that breaks: when the library
+signs a request to Canvas it derives the `kid` from the key material through
+jwcrypto, not from anything we told it. Canvas then looks that `kid` up in our
+JWKS and finds only uuids. The failure would have surfaced at task 1.14, as
+Canvas rejecting a Deep Linking response for no visible reason — a long way
+from the line that caused it.
+
+A thumbprint is computed from the key, so every party arrives at the same value
+independently and there is nothing to keep in step.
+
+**Evidence:** the implementation reproduces the test vector in RFC 7638 §3.1
+exactly, canonical JSON included — `NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs`.
+
+**Consequences:**
+
+- A key's identity now follows its material. Regenerating a file from the same
+  key yields the same `kid`, and two different keys can never collide.
+- `tool_key_id` values are 43 characters, inside the column's 64.
+- No key has been generated yet, so nothing has to be migrated.
+
+---
+
+## D-028 — OIDC state and nonce live in the LTI Redis database, for ten minutes
+
+**Date:** 2026-09-18 · **Task:** 1.4
+
+`apps/lti/tool_conf.py` gives PyLTI1p3 a `DjangoCacheDataStorage` bound to a new
+`lti_state` cache alias, which is the separate Redis logical database D-008
+reserved for this, and sets the launch data lifetime to **600 seconds**.
+
+**Rationale:** PyLTI1p3 defaults to 86400 seconds. A nonce is what stops a
+captured launch being replayed, so its lifetime is the width of the replay
+window — a day is far longer than a handshake that the library's own state
+cookie limits to five minutes. Ten minutes absorbs a slow redirect chain and
+closes the rest.
+
+Keeping it out of the default cache matters for the same reason: clearing the
+page cache to fix a stale page must not drop the nonce protecting a launch in
+flight, nor strand a user mid-handshake.
+
+**Consequences:**
+
+- Every one of the PyLTI1p3 APIs used here was read from upstream source in
+  this loop rather than recalled — `DjangoCacheDataStorage(cache_name=…)`,
+  `DjangoSessionService`, `ToolConfAbstract`'s four abstract methods,
+  `Registration`'s setters, `Deployment.set_deployment_id`. They are still
+  **unexecuted**: the library is not installed until the image is rebuilt.
+- `find_registration_by_issuer` refuses when an issuer has several active
+  registrations rather than choosing one. Choosing would mean validating a
+  launch against the wrong developer key.
+- The login view is `csrf_exempt` of necessity — Canvas's POST is cross-site
+  and cannot carry our token. It is safe because the view takes no action on
+  anyone's behalf: it redirects, and everything it emits is verified on return.
+
+---
+
+## D-029 — Findings from the independent review of 1.2–1.4
+
+**Date:** 2026-09-18 · **Task:** 1.4 · *Amends D-025, D-026, D-027*
+
+An independent reviewer went over tasks 1.2, 1.3 and 1.4 against the
+architecture rules and the PyLTI1p3 upstream source. Thirteen findings; all of
+the substantive ones are fixed, and the ones that changed a decision are
+recorded here.
+
+**The tool never stamped a `kid` on anything it signed.** D-027 replaced the
+random key id with an RFC 7638 thumbprint so that our JWKS and PyLTI1p3 would
+agree. They still would not have: PyLTI1p3 derives the `kid` from the **public**
+key, and `_registration` only ever set the private half, so `get_kid()` would
+return `None` and every signed JWT would go out with no `kid` header. With every
+key published (D-026), Canvas would have had nothing to select by. Both halves
+are now set; `keys.public_key_pem` is new.
+
+**The JWKS advertised the file name rather than the key.** `_jwk` took the
+`kid` from the PEM's stem. A file copied, restored or renamed would then be
+published under an identifier no signer derives — the exact drift D-027 exists
+to prevent. The thumbprint is now recomputed from the loaded key, so the
+invariant holds by construction rather than by filing discipline.
+
+**PyLTI1p3 ignored the client id.** `ToolConfAbstract.check_iss_has_one_client`
+defaults to true, so the library resolved every launch by issuer alone and
+`find_registration_by_params` was unreachable. An institution with two developer
+keys on one Canvas would have had its launch verified against whichever
+registration was found first. `PlatformToolConf.__init__` now declares the
+multi-client issuers, which is the library's own mechanism for this.
+
+**A sync produced different rows depending on whether the row existed.** On
+create, an omitted optional key took the model default; on update it kept
+whatever was already stored. Removing `"is_active": false` from the file left a
+platform disabled forever, and removing `deployment_ids` left stale ids
+launching — against D-025's claim that the file is the single source of truth.
+Entries are now completed at validation, so both paths write the same thing.
+
+**Validation could be bypassed and mistyped.** `sync_platforms` is public API
+but only `load_registrations` validated, so a caller reached an unhandled
+`TypeError`; and the required-field check stringified its input, letting
+`"issuer": null` pass as the literal `"None"`. Both fixed.
+
+**The JWKS endpoint had a filesystem side effect.** `key_directory()` created
+the directory and reset its mode on every call, including on an unauthenticated
+public GET, and raised — a 500 — if the mount was read-only. Reading and
+creating are now separate; the endpoint only reads, and serves an empty set
+rather than failing.
+
+**Not fixed, deliberately:**
+
+- The login error response is blanked by the browser, because
+  `X_FRAME_OPTIONS = "DENY"` still applies platform-wide. Task **4.4** replaces
+  it with a CSP `frame-ancestors` directive for the Canvas host; task **1.5**
+  inherits the same constraint for the launch error page. Until then the log
+  line is the only signal.
+- `enable_check_cookies()` is not called on the login view. In a Canvas iframe
+  with third-party cookies blocked, the library's `state` cookie is not stored
+  and the launch fails state validation. Task **1.10** owns that fallback, and
+  should use the mechanism PyLTI1p3 already ships rather than build one.
+
+**Consequence for the process:** the review caught a defect that automated
+checks could not, because there are no tests over `apps.lti` — task 1.16 owes
+all of them. Until then, review is the only gate on this module, and the
+findings above are what that is worth.
+
+---
+
+## D-030 — Nonces are made single-use by this platform, because PyLTI1p3 does not
+
+**Date:** 2026-09-18 · **Task:** 1.5
+
+`apps.lti.tool_conf.SingleUseNonceStorage` overrides `check_value` to delete the
+key rather than read it, so a nonce can be accepted exactly once.
+
+**Why.** Task 1.5 requires nonce replay protection and PyLTI1p3 appears to
+provide it: `validate()` calls `validate_nonce()`. But that reaches
+`CacheDataStorage.check_value`, which upstream is
+`return self._get_cache().get(key) is not None` — a read. The entry survives, so
+a captured launch could be replayed for the whole lifetime of the nonce. With
+D-028's 600 second lifetime that is a ten-minute replay window; with the
+library's own default it would have been twenty-four hours.
+
+**Why this is safe to override.** `check_value` has exactly one call site in the
+library: `SessionService.check_nonce`. State validation uses `_get_value`, and
+launch data uses `_get_value`/`_set_value`. Nothing else is consumed. Verified
+against `pylti1p3/session.py` at master on 2026-09-18.
+
+**Why delete rather than get-then-delete.** Redis `DEL` reports how many keys it
+removed, so of two concurrent replays exactly one sees a truthy result. A read
+followed by a delete would leave a window in which both pass.
+
+**Known trade:** `validate()` checks the nonce before the signature, so someone
+holding a captured launch could burn its nonce with a malformed token. They
+could equally replay that launch, which is the thing being prevented, and the
+user simply launches again. Not worth reordering the library for.
+
+---
+
+## D-031 — LTI pages carry their own frame-ancestors policy, ahead of task 4.4
+
+**Date:** 2026-09-18 · **Task:** 1.5
+
+The LTI views are exempt from the platform-wide `X_FRAME_OPTIONS = "DENY"` and
+set `Content-Security-Policy: frame-ancestors …` from `CANVAS_FRAME_ANCESTORS`
+instead.
+
+**Rationale:** a tool Canvas cannot put in an iframe is not a tool. `DENY`
+applies to every response, so it would blank the launch page, and — worse — the
+error page that explains why a launch failed, leaving a student with an empty
+frame and no way to report anything useful. This is a piece of task 4.4 pulled
+forward because 1.5 does not function without it, and it is bounded: one
+directive, on one module's views.
+
+**Consequences:**
+
+- An unset `CANVAS_FRAME_ANCESTORS` produces `frame-ancestors 'none'`, which
+  denies framing exactly as the platform default does. Nothing widens silently,
+  and a deployment that forgets the variable fails closed and visibly.
+- **Task 4.4 must extend this to the whole application** and should reuse
+  `apps.lti.tool_conf.canvas_frame_ancestors` rather than write a second policy.
+- Decorator order matters and is deliberate: `xframe_options_exempt` marks the
+  response the innermost view returns, so `canvas_framable` is applied closest
+  to the view, under `require_http_methods` and `csrf_exempt`.
+
+---
+
+## D-032 — A course is identified by issuer, platform guid and Canvas course id
+
+**Date:** 2026-09-19 · **Task:** 1.6
+
+`courses.Course` is unique on `(issuer, platform_guid, canvas_course_id)`.
+
+**Why not the issuer alone.** That was the first attempt, and an independent
+review found it unsafe: **every Instructure-hosted Canvas presents the same
+`iss`**. The institution's hostname never appears in that claim. Keyed on the
+issuer, one university's course 42 and another's would land on the same row —
+merging two rosters, and later two sets of reading positions. A silent
+cross-institution data merge is the worst failure available in this model, so
+the identity has to carry something instance-specific.
+
+`platform_guid` is the `guid` of the `tool_platform` claim, which distinguishes
+Canvas instances that share an issuer. It is blank when a platform does not
+send one, which is harmless: the pair `(issuer, "")` is then exactly the old
+behaviour, and it can only collide between two platforms that share an issuer
+*and* both omit the guid.
+
+**Why not the registration or the deployment id.** Both change under ordinary
+maintenance — rotating a developer key produces a new registration, reinstalling
+the tool produces a new deployment id. A course whose identity moved would
+strand every reading position pointing at the old one, which Section H forbids.
+They are recorded (`canvas_deployment_id`) but kept out of the identity.
+
+**Consequences:**
+
+- Task **1.8** must read `tool_platform.guid` from the launch claims and set it
+  when creating a course. A course created before that claim is read, and
+  updated after, would be created twice.
+- Open question for GAU, recorded in PROGRESS.md: is their Canvas cloud-hosted
+  or self-hosted, and will this platform ever serve a second institution? The
+  answer decides whether this constraint is merely correct or load-bearing.
+- **`accounts.User` has the same shape of question and has not been changed.**
+  `canvas_user_id` is unique on its own, with no issuer scope, which D-012's
+  note that "`sub` is only unique within an issuer" argues against. Canvas
+  issues a UUID for `sub`, so a practical collision is vanishingly unlikely —
+  but the two models now apply different identity rules, and task 1.8 upserts
+  both in one transaction. Confirm before 1.8 rather than after.
+
+---
+
+## D-033 — Cross-module services live in `backend/services/`
+
+**Date:** 2026-09-19 · **Task:** 1.8 · *Fulfils the commitment made in D-024*
+
+`backend/services/` now exists, holding work that belongs to no single module.
+Its first and only occupant is `provisioning.provision_launch`, which touches
+accounts, courses and lti inside one transaction.
+
+D-024 promised this package would be created when the first real cross-module
+service existed rather than left empty. This is that moment.
+
+**The dependency runs one way.** `services/` imports each module's
+`services.py`; no module imports `services/`. A module that needed something
+from here would be a sign the boundary is in the wrong place.
+
+**Why provisioning is not in `apps/lti/`.** It would have to reach into
+accounts and courses to do its job, which is exactly what rule C.1 exists to
+prevent, and it would make lti the owner of records it has no business owning.
+
+**Consequences:**
+
+- `known-first-party` in ruff's isort configuration now lists `services`.
+- Tasks 2.5 (resolving which book a course opens) and 3.6 (publish, which
+  spans versioning, content and search) are the next candidates for this
+  package. A service that fits inside one module still belongs in that module.
+
+---
+
+## D-034 — A launch is provisioned in one transaction, and nothing about privilege is inferred from it
+
+**Date:** 2026-09-19 · **Task:** 1.8
+
+`provision_launch` upserts the user, the course and the membership inside a
+single `transaction.atomic`.
+
+**Why one transaction.** A launch that created a user and then failed to record
+their membership would leave an account belonging to no course. The next launch
+would find that account, skip creation, and fail at the same point — so the
+person could never get in, and the failure would look like a Canvas problem
+rather than a half-written row. Either all three exist or the launch is refused
+and can be retried cleanly.
+
+**Concurrent first launches.** Canvas can fire two launches at once from one
+page. Each upsert wraps its insert in a savepoint and, on a unique-constraint
+violation, re-reads the row the other launch created rather than raising. That
+is what makes "never a second account" true under concurrency rather than only
+in the happy path.
+
+**Canvas-supplied fields are refreshed, never blanked.** Course privacy settings
+differ, so the same person can arrive with a name from one course and without it
+from another. Overwriting with an empty value would make a person's name depend
+on where they last launched from.
+
+**Nothing infers privilege.** `is_content_admin` is untouched by provisioning;
+no claim can grant it (D-023). A role demotion in Canvas takes effect on the
+next launch exactly as promptly as a promotion, because the membership role is
+written from the claims each time.
+
+**Consequences:**
+
+- A membership is reactivated rather than recreated when someone returns to a
+  course, so their reading position stays attached (Section H).
+- Task **1.9** takes over from here: `provision_launch` returns a
+  `LaunchContext`, and establishing the session from it is 1.9's work.
+- Task **1.15**'s audit log should record the outcome around this call, not
+  inside it — provisioning must not depend on the audit model existing.
+
+---
+
+## D-035 — `accounts.User` stays keyed on `canvas_user_id` alone
+
+**Date:** 2026-09-19 · **Task:** 1.8 · *Closes the confirmation D-032 asked for*
+
+D-032 flagged that a course is scoped by `(issuer, platform_guid,
+canvas_course_id)` while a user is identified by `canvas_user_id` alone, and
+required that to be settled before 1.8. It was not, and 1.8 shipped past it;
+an independent review caught the omission. Settled now.
+
+**Decision: leave it, deliberately.**
+
+- Django requires `USERNAME_FIELD` to name a **single unique field**. Scoping
+  the user by issuer would mean either a synthetic composite column
+  (`"<issuer>|<sub>"`, which puts parsing between the platform and every
+  lookup) or abandoning `USERNAME_FIELD`, and with it the Django admin login
+  used by operators.
+- Canvas issues a UUID for `sub`. Two people colliding would need two
+  platforms to generate the same UUID, which is a different order of
+  unlikelihood from two courses both being numbered 42 — the collision D-032
+  fixed, which was near-certain rather than improbable.
+
+**What this costs.** If the platform ever serves a second institution, this is
+the second thing to revisit, after D-032's constraint. The failure mode is the
+"never a second account" criterion inverted: one account for two people. The
+open question already recorded for GAU covers both.
+
+---
+
+## D-036 — Corrections from the review of 1.5, 1.7 and 1.8
+
+**Date:** 2026-09-19 · **Tasks:** 1.5, 1.7, 1.8
+
+**An unexpected exception in an LTI view produced a blank Canvas frame.** The
+views caught the failures they expected; anything else — a database error, a
+`ValueError` from an upsert — propagated past the `canvas_framable` decorator,
+so the `frame-ancestors` header was never attached and Django's 500 was stamped
+`X-Frame-Options: DENY`. The student would see an empty frame with nothing to
+report. Both `login` and `launch` are now thin guards that cannot raise, and
+every response leaves through the decorator. This was a direct failure of 1.5's
+"clear error page on any failure", on the path most likely to be hit in
+production.
+
+**The concurrency fix depended on an isolation level nothing pinned.** The
+savepoint-and-re-read in the upserts is correct under READ COMMITTED, where a
+losing `INSERT` blocks until the winner commits and the re-read then sees the
+row. Under REPEATABLE READ the transaction holds one snapshot taken before that
+commit, the re-read finds nothing, and a legitimate launch fails. Nothing in the
+settings pinned the level — it was whatever the server or a pooler happened to
+default to. Now pinned in `core/settings/base.py`.
+
+**`IntegrityError` was caught too broadly.** A foreign key or NOT NULL
+violation raises it just as a unique violation does; the handler then re-read,
+found nothing, and raised `DoesNotExist`, reporting a missing row instead of
+the real cause. `utils/db.create_or_reread` now re-raises the original
+`IntegrityError` when the re-read comes up empty. This is also the first real
+occupant of `backend/utils/`, which D-024 said would be created when it held
+something.
+
+**`institution/person#Staff` granted FACULTY.** In the IMS vocabulary that role
+is a non-academic institutional employee — a registrar, IT, administration —
+not someone who teaches. Anyone the institution employed would have got the
+faculty view of every course they opened. Now STUDENT.
+
+**A deployment the tool was never installed into reported itself as a failed
+verification**, sending an administrator to look at link expiry rather than at
+the installation. The tool configuration now records that specific rejection
+and the view says so.
+
+**`provision_launch`'s docstring overclaimed.** It said nothing about privilege
+is inferred from a launch. The course role is written from the claims, by
+design; what a launch cannot confer is `is_content_admin`. Narrowed to say so.
+
+**PROGRESS.md claimed PyJWT enforces `iat`.** It verifies `exp` by default but
+treats `iat` only as a format check, not a freshness one. Corrected rather than
+left as a claim the tests would later be written against.
+
+---
+
+## D-037 — Iframe cookie flags belong in base settings, not production settings
+
+**Date:** 2026-09-19 · **Task:** 1.9
+
+`SESSION_COOKIE_SAMESITE = "None"`, `SESSION_COOKIE_SECURE = True` and their
+CSRF counterparts have moved from `prod.py` into `base.py`, and `dev.py` no
+longer relaxes them.
+
+**Why.** The reader runs in a Canvas iframe, so every request is cross-site and
+a cookie without `SameSite=None` is simply not sent. Browsers reject
+`SameSite=None` unless the cookie is also `Secure`, so the two are one setting
+in practice. Leaving them to production meant the iframe session was only ever
+exercised in production — and the failure is silent: the launch succeeds, and
+every request after it arrives anonymous.
+
+`dev.py` previously set `SESSION_COOKIE_SECURE = False`, which would have
+broken the very flow it was trying to make convenient.
+
+**Consequences:**
+
+- Local development must reach the platform over `http://localhost`,
+  `http://127.0.0.1` (both of which browsers treat as secure contexts) or
+  HTTPS. A LAN address will silently drop the session. Documented in `dev.py`
+  where a reader would otherwise be tempted to relax it again.
+- `CSRF_COOKIE_HTTPONLY` stays False: the frontend has to read that token to
+  echo it back.
+
+---
+
+## D-038 — The launch ticket is a header-only, single-use bearer credential
+
+**Date:** 2026-09-19 · **Task:** 1.9
+
+A launch mints a 32-byte URL-safe token, stores the user, course and role
+against it in the LTI Redis database for **120 seconds**, and hands it to the
+frontend on the redirect. `POST /lti/session/` exchanges it for a session.
+
+**Why a ticket at all.** A browser blocking third-party cookies discards the
+launch's session cookie without saying so. The ticket is what lets task 1.10
+open a first-party window and establish a session there.
+
+**It must arrive in the `X-Launch-Ticket` header.** That is the CSRF control,
+not a convention. A cross-site HTML form can POST to this endpoint but cannot
+set a custom header, and a cross-origin `fetch` that sets one is stopped by a
+preflight this origin does not answer. Without that requirement, a forged
+cross-site POST could log a victim into an attacker's launch context — login
+CSRF — which is why exempting the endpoint from Django's CSRF check is
+acceptable only alongside it.
+
+**Single use, enforced by the delete.** Redemption reads the ticket and then
+deletes it, and only the caller whose `DEL` actually removed the key proceeds.
+Two simultaneous redemptions cannot both succeed.
+
+**One answer for every failure.** Unknown, expired, already used, or naming a
+deactivated account all return the same 401. Distinguishing them would tell
+someone guessing how close they were.
+
+**Consequences:**
+
+- The ticket travels in the URL, so it can reach browser history and a
+  `Referer`. Single use and a two-minute life are what make that acceptable;
+  **task 1.12 should strip it from the address bar** once redeemed.
+- Task **1.11**'s course-scope middleware reads `SESSION_COURSE_KEY` and
+  `SESSION_ROLE_KEY`, named in `services/launch_session.py` rather than spelled
+  out at each use.
+- `django_login` rotates the session key, so a session identifier planted
+  before a launch cannot survive it.
+
+---
+
+## D-039 — Sessions get their own Redis database; a session is not cache
+
+**Date:** 2026-09-19 · **Task:** 1.9 · *Extends D-008*
+
+A fifth logical Redis database, `SESSION_REDIS_URL`, holds sessions. D-008
+separated cache, broker, results and LTI state; sessions were never considered
+and had been sharing database 0 with the page cache.
+
+**Why it matters.** Clearing a stale page is a routine, low-stakes operation.
+Doing it would have signed every reader out mid-chapter. Worse, an `allkeys-lru`
+eviction policy under memory pressure can drop a session at any moment. Neither
+failure announces itself as anything but "I got logged out", which is close to
+impossible to attribute after the fact.
+
+**Why not `cached_db`.** It is the usual answer for durability, but
+`SESSION_SAVE_EVERY_REQUEST` is on, so it would mean a database write on every
+request of a reading session — expensive on exactly the traffic this platform
+exists to serve. A dedicated Redis database keeps the speed and removes the
+shared-fate problem.
+
+**Consequences:**
+
+- **Task 4.8 must confirm the Redis eviction policy** does not apply to the
+  session database, and that AOF persistence covers it.
+- `core/settings/test.py` now derives its `CACHES` from the alias names rather
+  than listing one. It had defined only `default`, so every test touching the
+  LTI state or session cache would have raised `InvalidCacheBackendError` on
+  setup — the suite would have failed as broken tests rather than as broken
+  settings. Found by review, before any test was written against it.
+
+---
+
+## D-040 — What the review of 1.9 changed, and what it left standing
+
+**Date:** 2026-09-19 · **Task:** 1.9
+
+**The CSRF reasoning on `/lti/session/` was checked and holds.** No HTML form,
+navigation, `sendBeacon` or resource load can attach a custom header; a
+`fetch` that sets one needs a preflight, and with no CORS layer `OPTIONS` is
+refused. A sibling subdomain does not change it, because CORS is origin-scoped.
+Login-CSRF through that endpoint is genuinely mitigated.
+
+But the control is the *absence* of something, which no test can catch. Two
+things now guard it: a note beside `MIDDLEWARE` for whoever adds a CORS layer,
+and an `Origin` check in the view as defence in depth.
+
+**`SESSION_LAUNCH_KEY` was dead** — exported, never written, never read, and an
+invitation for task 1.11 to read a key nothing sets. Removed.
+
+**The `lti_state` alias was spelled in two modules.** Both now take it from
+settings.
+
+**Left standing, deliberately — the landing page has no framing policy.** Since
+the launch became a redirect, the document inside the Canvas frame is the
+Next.js page, and a `frame-ancestors` header on a 302 is never enforced against
+anything. It frames today by accident.
+
+The obvious fix is wrong in an instructive way. `headers()` in
+`next.config.mjs` is evaluated at **build** time and written into the routes
+manifest, so `process.env.CANVAS_FRAME_ANCESTORS` would be read during
+`next build` — where it is unset — baking `frame-ancestors 'none'` and blocking
+Canvas entirely. That change was written, and reverted on discovering it.
+
+**Task 4.4 owns this**, and should use the nginx image's `envsubst` template
+mechanism so the value is resolved at container start. This note exists so 4.4
+does not rediscover the trap the expensive way.
+
+**Also standing: the launch ticket may turn out to be unnecessary.** PyLTI1p3's
+`validate_state` falls back to comparing `state` against a **cookie** when it
+has no stored id-token hash, which is the case on a first launch. A browser
+blocking third-party cookies therefore fails at launch, before any ticket is
+minted. Task **1.10** must decide whether the ticket is still the right
+mechanism once the handshake happens in a first-party window — and if it is
+not, remove it rather than leave it unused.
+
+---
+
+## D-041 — The blocked-cookie fallback is PyLTI1p3's, not ours
+
+**Date:** 2026-09-19 · **Task:** 1.10
+
+`/lti/login/` calls `enable_check_cookies()` with our own wording rather than
+building an interstitial. D-029 flagged that the library already ships this
+mechanism; this is that flag being acted on.
+
+**What it does.** Instead of redirecting straight to Canvas, the login returns a
+page that writes a cookie and reads it back. If that works, it continues on its
+own and the reader sees a flicker. If the browser refuses cookies to a framed
+third party, it offers to open the textbook in a new tab, where this platform is
+first-party.
+
+**Why the fallback is load-bearing rather than a nicety.** The 1.9 review
+established that PyLTI1p3 binds the OIDC `state` to a cookie on a first launch.
+So a browser blocking third-party cookies does not merely lose its session after
+the launch — the launch itself fails state validation, and reports itself as a
+verification failure, which reads like a misconfigured developer key. Without
+1.10, Safari's default settings would have looked like a broken Canvas
+registration.
+
+**Costs, accepted:**
+
+- Every launch now renders one extra page, including the great majority where
+  cookies work. That is the price of finding out, and it is one round trip.
+- The page requires JavaScript, and without it the reader gets a **blank
+  page** — both the loading and warning blocks start hidden and are revealed
+  by script. An earlier version of this entry said they would see "Opening the
+  textbook…", which is wrong; review corrected it. LTI is unusable without
+  JavaScript anyway, but a blank page is a worse way to say so.
+- The page is the library's markup and carries no GAU styling. **Task 4.5**
+  should either restyle it or accept it; it is the first thing some readers
+  will see.
+- **Validation now happens one round trip later.** PyLTI1p3 runs
+  `validate_oidc_login` while preparing the redirect, which is the *second*
+  pass. An unregistered issuer or a missing `login_hint` therefore no longer
+  produces the "not configured" page immediately — the cookie check renders
+  first, and the error surfaces after the automatic continue or the click. The
+  error is the same and is still logged; only its timing moved.
+- **A browser blocking cookies outright, not merely third-party ones, still
+  fails misleadingly.** The second pass proceeds regardless of whether the
+  cookie test actually succeeded, the `state` cookie never lands, and the
+  launch ends on the generic "could not be verified" page — the very message
+  this task exists to avoid. That is the library's design and not worth forking
+  it for; it is recorded so nobody diagnoses it twice.
+
+---
+
+## D-042 — The launch ticket is kept, and its fate belongs to task 1.12
+
+**Date:** 2026-09-19 · **Task:** 1.10 · *Answers the question D-040 left open*
+
+D-040 asked whether the launch ticket survives 1.10, since the new-tab flow
+completes first-party and gets a session cookie without needing one. On the
+evidence, it does not appear to be needed: there is no path where the cookie is
+dropped but a later request would keep one.
+
+**Kept anyway, deliberately.** The backlog specifies it — task 1.9 reads
+"signed session cookie … short-lived launch token handed to the frontend" — and
+removing it is a reduction in agreed scope, which is not a call to make quietly
+while the person who set the scope is not asked.
+
+**What that costs.** `POST /lti/session/`, `redeem_launch_ticket` and
+`RedeemedSession` have no caller until task 1.12. That is a real tension with
+Section H's ban on dead code, and it is recorded here rather than hidden.
+
+**Decide at 1.12.** If the frontend finds no use for the ticket, remove the
+endpoint and the redemption path then, rather than carrying an unused
+credential-issuing endpoint into production. An endpoint that mints and accepts
+bearer tokens nobody uses is attack surface with no compensating benefit.
+
+---
+
+## D-043 — Course scope comes from the session, and denial is the default
+
+**Date:** 2026-09-19 · **Task:** 1.11
+
+`CourseScopeMiddleware` reads the launch's course and role from the session onto
+every request; `CourseScoped` is the DRF permission that enforces them.
+
+**The scope is never taken from the request.** A course id in a URL or a body is
+something the client is *asking for*; a course id in the session is something a
+signed Canvas launch *established*. The permission compares the two and the
+session wins. This is the whole of acceptance criterion 12, and it is the reason
+`LaunchContextView` takes no course parameter — there is nothing to tamper with.
+
+**`has_object_permission` fails closed.** An object whose course cannot be
+determined is denied, not allowed. A model with neither a `course` relation nor
+a `course_id` must not be guarded by this permission, because it would be
+refused every time — which is the right way round to be wrong.
+
+**An unparseable role in the session becomes STUDENT**, not an error. A session
+written by an older release, or tampered with, must degrade to the least
+privilege rather than 500 or escalate.
+
+**Consequences:**
+
+- The middleware sits **after** `AuthenticationMiddleware`. A scope without an
+  authenticated user is meaningless, and accepting one would hand a course
+  context to an anonymous request.
+- `has_object_permission` only runs when a view calls
+  `check_object_permissions`. **Task 2.6 must filter its querysets by the
+  scope**; a list endpoint that returns rows without per-object checks is not
+  protected by this class, and that is the likeliest way criterion 12 gets
+  broken later.
+- Task **2.2**'s `ContentNode` belongs to a book, not a course, so it cannot be
+  guarded directly. Task **2.6** resolves book to course through
+  `courses.services` and scopes there.
+- `GET /lti/context/` is the first consumer, which is deliberate: a permission
+  class with no caller is a permission class nobody has checked works.
+
+---
+
+## D-044 — What the review of 1.11 changed, and the one thing it could not close
+
+**Date:** 2026-09-19 · **Task:** 1.11 · *Amends D-043*
+
+**The bypass hunt came back empty, which is the useful part.** An operator
+logged into the Django admin has a real session and `is_authenticated`, and
+still gets no scope — it is the *course key* that gates it, not the user. The
+session keys have exactly two writers, both after verification. The scope
+attribute is set unconditionally on every request before any view runs, so
+there is nothing to pre-seed. And the two UUID strings being compared are both
+`str(uuid.UUID)`, canonically lowercase and hyphenated, so there is no
+formatting mismatch to deny a legitimate request and no way to collide.
+
+**Course identity is now an `isinstance`, not a class-name check.** The original
+compared `type(obj).__name__` to `"Course"`. That is correct only while exactly
+one class in the process is called Course, and would stop being correct in
+silence. `Course` is imported from `apps.courses.services`, which is the
+boundary rule C.1 allows.
+
+**A branch was dead.** The fallback reading `obj.course` can never run for a
+Django model: any foreign key named `course` also exposes `course_id`, which is
+consumed first, and when that is None the relation is None too. Removed — and
+the PROGRESS claim that a "related via `.course`" model shape was covered has
+been corrected, because the hand-check that produced it was exercising a
+synthetic object rather than anything this codebase will produce.
+
+**The part that cannot be closed inside 1.11.** `has_object_permission` — the
+half that actually produces "403 on any other course" — has no caller, because
+the first view with an object to check is task 2.6's read API. So no request in
+this system can currently emit a cross-course 403. The mechanism is sound and
+fails closed, but **acceptance criterion 12 is not demonstrated by anything
+yet**, and that is a fact about the backlog's ordering rather than a defect in
+this task. Tasks 2.6, 1.16 and 4.3 are where it becomes real.
+
+**Deferred with an owner: `CourseScoped` is opt-in.** Any future view that
+forgets it is course-blind. The project already defaults DRF to
+`IsAuthenticated` for exactly this reason, and the same argument extends here.
+**Task 3.1** is the right moment to decide: it introduces the second permission
+family (`IsContentAdmin`, which is not course-scoped), so the default and its
+opt-outs can be chosen with both in view rather than guessed at now.
+
+---
+
+## D-045 — The launch ticket stays, because the landing page uses it
+
+**Date:** 2026-09-19 · **Task:** 1.12 · *Closes the question D-042 deferred*
+
+`frontend/app/launch` calls `GET /lti/context/` first. Only if that comes back
+unauthenticated or forbidden, **and** the launch put a ticket in the address
+bar, does it redeem the ticket and retry. So the ticket is not a parallel way
+in — it is a fallback that costs nothing when the cookie worked, which is the
+majority case.
+
+D-042 recorded that the ticket looked unnecessary once 1.10 moved the handshake
+into a first-party window, and set this task to decide. The decision is to keep
+it, on two grounds:
+
+- It now has a caller, so it is no longer the dead credential-issuing endpoint
+  D-042 was worried about.
+- Cookie behaviour in a Canvas iframe is not one thing. Partitioned cookies,
+  storage-access grants and per-browser policies all differ, and a launch that
+  lands with no session but a valid ticket recovers silently instead of telling
+  a student to go back to Canvas.
+
+**The ticket is removed from the address bar** as soon as it has been used or
+found unusable. It is single-use and lives two minutes, but leaving it in the
+URL would put a credential in browser history and in any `Referer` the page
+later emits.
+
+---
+
+## D-046 — Role decides the route; it does not decide access
+
+**Date:** 2026-09-19 · **Task:** 1.12
+
+`lib/launch/routing.ts` maps a role to a landing: a student goes to the reader,
+faculty to their dashboard, an administrator is **offered** the content manager
+alongside the textbook.
+
+**Offered, not sent.** The backlog says "admin offered CMS" and that wording is
+load-bearing. An administrator is usually in the course to read it; opening the
+CMS is a deliberate act. So the reader stays their primary action and the CMS is
+the secondary one.
+
+**The route is a convenience, never a gate.** Nothing here grants anything. The
+CMS link is a link; entry is decided by `is_content_admin` on the server, which
+no Canvas role confers (D-023). A student who types `/cms` reaches exactly what
+a student is allowed to reach, which is nothing — and that is the server's
+answer, not the router's.
+
+**Kept as data and a pure function**, outside any component, so tasks 4.1 and
+4.2 can reuse the rule rather than restate it. Executed on this host across all
+three roles.
+
+**Consequences:**
+
+- `/reader`, `/faculty` and `/cms` do not exist yet — tasks 2.8, 4.2 and 3.2
+  build them. Until then those links reach the `not-found` page, which is a
+  real page rather than a crash.
+- The page deliberately **presents** the destination instead of redirecting to
+  it. Once the destinations exist, 2.8 can switch student and faculty to an
+  automatic `router.replace(destinationFor(role).primary.href)`; sending
+  someone straight to a page that does not exist yet would be worse than
+  showing them where they are.
+
+---
+
+## D-047 — What the review of 1.12 changed in the launch landing
+
+**Date:** 2026-09-19 · **Task:** 1.12
+
+Four defects, all in the fallback path — the one that only runs when a
+browser has discarded the session cookie, and so the one least likely to be
+noticed before a student hits it.
+
+**`replaceState(null, …)` erased the App Router's history state.** Next.js
+keeps its routing tree in `history.state`; passing null wiped it on every
+launch, degrading back and forward navigation away from `/launch`. The current
+state is now passed through.
+
+**The ticket was stripped from the URL before the abort check**, on every path
+including the aborted one. Under React's StrictMode double-invoke the discarded
+first run could rewrite the URL while the second was still in flight; if that
+second run then failed, the reader saw an error and a reload had no ticket left
+to recover with — destroying exactly the recovery D-045 keeps the ticket for.
+The strip now happens after the outcome is known, and **never on a transient
+error**, where a reload is the one thing that might still work.
+
+**There was no abort check between the context call and the redemption.** An
+unmounted component still burned the single-use ticket for a render nobody
+would see.
+
+**A redemption whose body failed validation was read as "no session".** The POST
+had returned 200 and the browser had honoured its `Set-Cookie`; the reader was
+told to go back to Canvas while signed in. The redemption's result is now
+ignored entirely and the context is re-fetched — that call is the only
+trustworthy answer to "am I signed in", and a body that fails to parse says
+nothing about whether a cookie was set.
+
+**Also:** the heading is now `aria-live="polite"`, so a screen-reader user hears
+the outcome rather than only the loading message.
+
+**The StrictMode double-invoke did not break it** at the time of review, but
+only because React's remount is synchronous and beat the strip. That was a
+timing coincidence, not a guarantee; moving the strip after the abort check is
+what makes it structural.
+
+---
+
+## D-048 — Correction to D-033: a module's edges may import `services/`
+
+**Date:** 2026-09-19 · **Task:** 1.13 · *Corrects D-033*
+
+D-033 stated: "`services/` imports each module's `services.py`; no module
+imports `services/`." The second half was already untrue when it was written —
+`apps/lti/views.py` imports `services.provisioning` and `services.launch_session`
+— and task 1.13 adds `apps/lti/tasks.py` importing `services.roster`.
+
+The rule that is actually being followed, and the one that matters:
+
+- A module's **core** — `models.py`, `services.py` — must never import the
+  shared package. That would be circular, since the shared package imports it.
+- A module's **edges** — `views.py`, `tasks.py`, management commands — may.
+  They are composition roots: their whole job is to wire a transport to the
+  work, and the work sometimes spans modules.
+
+Stated wrongly it would eventually have been enforced wrongly, by moving
+orchestration back inside a module to satisfy a rule nobody was following.
+
+---
+
+## D-049 — A roster sync never infers absence from silence
+
+**Date:** 2026-09-19 · **Task:** 1.13
+
+`services/roster.py` reconciles a course's memberships against the Names and
+Roles service; `apps/lti/tasks.py` runs it, on demand and every six hours.
+
+**A course with no Names and Roles URL is skipped, not emptied.** The claim is
+absent when the platform does not offer the service or the developer key lacks
+the scope. From the platform's side "no service" and "an empty roster" look
+identical, and acting on the wrong one would deactivate an entire course.
+
+**Nothing is ever deleted.** Someone who leaves gets `is_active = False`. A
+reading position hangs from a membership, so deleting the row would take a
+student's history with it (Section H), and someone who re-enrols is reactivated
+with everything they had.
+
+**A member Canvas reports as anything other than Active is deactivated**, and a
+member with no status is treated as active — Canvas omits the field for a
+normal enrolment.
+
+**One malformed member does not abandon the roster.** An entry with no
+`user_id` is counted as skipped and reported, because losing one row is better
+than losing the reconciliation.
+
+**The network call happens outside the transaction.** Fetching a large roster
+takes seconds; holding a database transaction open across it would lock every
+row involved for the duration.
+
+**Retries distinguish weather from configuration.** A missing signing key or an
+unregistered platform is not retried — the message saying what to fix would be
+buried under a retry storm. A network failure retries three times, five minutes
+apart, because a roster being an hour stale costs nothing and hammering Canvas
+during an outage costs everyone.
+
+**Consequences:**
+
+- **The interval is a security parameter, not just a performance one.** Six
+  hours is how long a student removed from a Canvas course keeps access.
+  `ROSTER_SYNC_INTERVAL_SECONDS` makes it a decision GAU can take rather than
+  one buried in code — worth raising with them at task 4.9.
+- The sweep fans out one task per course, so one course's failure cannot stop
+  the rest and each retries on its own schedule.
+- `migrations/courses/0001_initial.py` was **amended** rather than followed by
+  an 0002. That is safe only because no migration has ever been applied
+  (D-009); after the first `migrate` it would be a schema rewrite.
+
+---
+
+## D-050 — A deep link points at the launch endpoint, never at content
+
+**Date:** 2026-09-19 · **Task:** 1.14
+
+A Deep Linking response returns a content item whose `url` is this tool's
+`/lti/launch/`, with the chosen part of the book carried as the custom
+parameter `node_id`. Canvas stores that as a resource link; launching it is an
+ordinary launch, and the node id comes back in the `custom` claim.
+
+**Why not link straight to the content.** A URL pointing at a chapter would be
+a URL that bypasses the signature check, the nonce, the deployment check and
+the course scope — every guarantee tasks 1.5 to 1.11 exist to provide. Routing
+through the launch endpoint means a deep-linked chapter is exactly as protected
+as any other, and the node id is a *preference* expressed inside a verified
+launch rather than an access decision made by a URL.
+
+**Answered before provisioning.** A deep linking request is someone building a
+course, and it does not always carry a course context — requiring one would
+refuse a legitimate request made at account level. Nothing is created; the
+reply is a signed content item.
+
+**The foundation returns one item, for the textbook as a whole.** Choosing a
+chapter needs chapters to choose from, so the picker arrives with the content
+model (tasks 2.2, 2.3). What is built and working now is the part that would
+otherwise be discovered late: the custom parameter, the claim that carries it
+back, and the route from that claim to `/launch?node=…` and on to the
+destination.
+
+**Consequences:**
+
+- A platform with no `tool_key_id` cannot answer a deep linking request at all,
+  because the response is a signed JWT. The failure surfaces from the signing
+  call. D-027's public-key fix is what makes the `kid` on that JWT resolvable
+  in our JWKS — untested until a real Canvas asks.
+- The item is `iframe`-targeted: the reader is built for the Canvas frame, and
+  a deep-linked chapter should open where the student is already looking.
+- **Task 2.8** must honour `?node=` when the reader exists. The frontend
+  carries it to the destination URL rather than holding it in state, so a link
+  a reader copies still points at the same chapter.
+- The item title is a constant for now. **Task 2.5** should use the book's own
+  title once a course resolves to a book.
+
+---
+
+## D-051 — The launch audit log holds no foreign keys and can never break a launch
+
+**Date:** 2026-09-19 · **Task:** 1.15
+
+`lti.LtiLaunchLog` records every launch this tool was asked to serve, accepted
+or refused. `apps/lti/audit.py` writes it; the launch view calls it at each
+outcome.
+
+**No foreign keys.** The user and course are plain `UUIDField` columns with no
+relation. Three reasons, in order of weight: an audit record must outlive what
+it describes; it must never be the reason another operation fails; and most
+refused launches have no user or course to point at anyway. It also keeps the
+lti module free of a schema dependency on accounts and courses.
+
+**Writing it can never break a launch.** Every failure in `record_launch` is
+logged and swallowed. Letting one propagate would mean a database hiccup turns
+a working launch into an error page — trading the thing being protected for the
+record of it.
+
+**`claims_of` never raises either.** It runs on the failure path, where the
+launch may be half-validated, unvalidated, or absent entirely. Executed on this
+host against a full body, a string `aud`, an empty `aud`, a non-dict body, a
+launch that throws, and `None`: six for six return something usable.
+
+**Outcomes distinguish refusals an administrator would act on differently.**
+"Refused" alone sends someone to check the wrong thing — a deployment that was
+never installed and an expired link need different fixes, so they are different
+outcomes.
+
+**The nonce is recorded**, which is what makes a replay attempt visible: two
+rows sharing one nonce, the second refused by the single-use check (D-030).
+
+**What is deliberately NOT recorded:** names, emails, tokens. This is read by
+operators, and an audit log is a poor place to accumulate personal data. The
+`detail` column is capped at 500 characters so a traceback cannot arrive whole.
+
+**Consequences:**
+
+- The table grows without bound. **Task 4.8** should decide a retention period
+  with GAU and add a pruning task; an audit log nobody can query is no better
+  than none.
+- Two indexes ship with it — recent-first, and by Canvas user — because the two
+  questions asked after an incident are "what happened just now" and "did this
+  person get in".
+- `migrations/lti/0001_initial.py` was **amended** rather than followed by an
+  0002, which is safe only because nothing has been applied (D-009).
+
+---
+
+## D-052 — Stage 1's tests are written against our half of the protocol
+
+**Date:** 2026-09-19 · **Task:** 1.16
+
+The client lifted the standing instruction against tests, so Stage 1's coverage
+now exists — 109 test functions, 64 of them new.
+
+**They have not been run.** Docker is paused and Django is not installed on this
+host. Ruff is clean, every file parses, and all 68 names the tests import were
+confirmed to exist in the modules they come from. That catches a renamed
+function; it does not catch a wrong expectation. The suite should be assumed to
+contain failures until `pytest` says otherwise.
+
+**Two of the eight listed cases are covered at a different layer than the
+backlog implies.** "Expired token" and "wrong aud" as end-to-end signed JWTs
+need a mock platform issuing real tokens against a JWKS the tool fetches.
+Written blind against PyLTI1p3 internals that cannot be executed here, those
+tests would fail for their own reasons rather than the code's — which is worse
+than not having them, because a red test nobody trusts gets disabled.
+
+What is covered instead is the half this codebase owns: a wrong audience does
+not resolve to a registration; a deployment the tool was never installed into is
+refused; and the nonce is single-use, asserted at the storage layer where that
+behaviour is actually implemented (D-030), rather than through a JWT.
+
+**The end-to-end tests are owed** and are recorded in PROGRESS. They are the
+right tests; they need a running stack to be written honestly.
+
+**What the suite does assert that nothing else did:** that a demotion in Canvas
+takes effect as promptly as a promotion; that a name Canvas stops sending is not
+forgotten; that a returning member is reactivated rather than recreated, so a
+reading position survives; that an operator signed into the Django admin gets no
+course scope; that a sync never deletes and refuses an empty file; and that two
+Canvas instances sharing an issuer do not merge into one course.
+
+---
+
+## D-053 — A book has two gates, and neither one deletes
+
+**Date:** 2026-09-19 · **Task:** 2.1
+
+`content.Book` carries a `status` of DRAFT, PUBLISHED or ARCHIVED, and only
+PUBLISHED is readable.
+
+**Two gates, not one.** A student sees content when the *book* is published and
+the *node's version* is published (task 2.4). Both must say yes. That is what
+lets an editor rewrite chapter nine of a live textbook without anyone seeing it,
+and what lets a whole book be withdrawn without touching any version.
+
+**DRAFT is the default**, deliberately. A book created by the import pipeline
+(task 3.11) must not become visible because someone forgot a step; visibility
+should be something a person did, not something that happened.
+
+**ARCHIVED is not deleted, and this is the point.** Withdrawing a book keeps
+every version and every reading position pointing into it, so re-publishing
+restores the lot. Deleting would orphan reading positions, which Section H
+forbids outright.
+
+**The slug is a handle, never a reference.** Nothing stores one as a pointer,
+because renaming a slug would then silently move every reading position in the
+book. Identity is the uuid (rule C.2); the slug exists for URLs and for import
+tooling to address a book by.
+
+**Consequences:**
+
+- A database-level check refuses an empty title. An untitled book is unfindable
+  in a CMS list and unnameable in a course, and a form validator is not where
+  that should be caught for something created by an importer.
+- **Task 2.5** maps a course to a book. It must respect the status gate, not
+  merely the mapping's existence.
+- **Task 2.12** must remove a book's documents from the search index when it
+  stops being published, or archived content stays findable.
+- `slug` is unique across all books, including archived ones. Re-using the slug
+  of an archived book therefore fails. Acceptable, and better than the
+  alternative where two books answer to one URL.
+
+---
+
+## D-054 — The tree is stored twice: a parent relation, and a sortable path
+
+**Date:** 2026-09-20 · **Task:** 2.2
+
+`content.ContentNode` carries both a `parent` foreign key and a materialised
+`path` of zero-padded positions, e.g. `0001.0003.0002`.
+
+**Why both.** The parent relation is the truth and the thing an editor changes.
+The path is that truth flattened into something PostgreSQL can sort and
+range-scan, because the reader needs the entire table of contents on every page
+load and walking a parent relation costs one query per level.
+
+Each operation task 2.3 needs then becomes a single query:
+
+| Need | Query |
+|---|---|
+| Full tree in reading order | `ORDER BY path` |
+| A subtree | `path LIKE '0001.0003.%'` |
+| A node's ancestors | its path's own prefixes, matched with `IN` |
+| Previous and next node | the rows either side in path order |
+
+That last row is the one that pays for the whole design. Moving from the final
+section of one chapter into the next chapter is not a special case — it is just
+the next row.
+
+**Zero padding is load-bearing.** Unpadded, `"10"` sorts before `"2"`, which
+would put section 10 ahead of section 2 in every table of contents. Four digits
+allows 9,999 siblings per level.
+
+**The path is derived, never authored.** `position` is what an editor changes;
+task 3.3 recomputes paths for the moved subtree in the same transaction. It is
+`editable=False` so nothing offers it as a field, and a check constraint
+refuses an empty one — a node outside the path ordering is invisible to every
+tree read, which is a far worse failure than a rejected insert.
+
+**Positions are not unique in the database.** They should be unique among
+siblings, but a partial unique constraint cannot be `DEFERRABLE` in PostgreSQL,
+and a non-deferred one makes reordering impossible without temporary
+violations. Instead `ordering = ("path", "id")` carries a tiebreak, so a
+transient duplicate during a reorder cannot make the tree order unstable.
+**Task 3.3 owns keeping them distinct.**
+
+**Node types are not constrained by the database.** Which type may nest inside
+which is a rule of the hierarchy service, not a row-level fact — expressing it
+as a check constraint would encode the whole ladder, and an import producing a
+slightly irregular tree should be fixable rather than rejected at the row.
+
+**Consequences:**
+
+- Both foreign keys are `PROTECT`. Deleting a book or a node with children
+  fails loudly instead of quietly taking a subtree and every reading position
+  in it.
+- **Task 3.3's move and reorder must rewrite the paths of the entire moved
+  subtree**, not just the node. A node whose path no longer matches its parent
+  chain is a tree that disagrees with itself, and nothing will complain.
+- **Task 2.9's `ReadingPosition` must reference a node by uuid**, never by
+  path. A reorder changes paths; it must not move anyone's place in the book.
