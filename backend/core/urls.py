@@ -11,19 +11,18 @@ map of the platform rather than a place where views are defined.
 from __future__ import annotations
 
 from django.contrib import admin
-from django.urls import path
+from django.urls import include, path
 
-from config.health import health, liveness
+from core.health import health, liveness
 
 urlpatterns = [
-    # Operational. Unauthenticated by design; see config/health.py.
+    # Operational. Unauthenticated by design; see core/health.py.
     path("api/health/", health, name="health"),
     path("api/live/", liveness, name="liveness"),
     path("admin/", admin.site.urls),
-    # Mounted by their tasks:
-    #   path("lti/", include("apps.lti.urls")),           task 1.3
-    #   path("api/", include("apps.content.urls")),       task 2.6
-    #   path("api/", include("apps.reader.urls")),        task 2.10
-    #   path("api/", include("apps.search.urls")),        task 2.13
-    #   path("api/cms/", include("apps.cms.urls")),       task 3.2
+    # JWKS and OIDC login; the launch endpoint joins them in task 1.5.
+    path("lti/", include("apps.lti.urls")),
+    # Still to be mounted, each by the task that builds it: the content API at
+    # /api/ (2.6), reading positions (2.10), search (2.13), and the CMS API at
+    # /api/cms/ (3.2).
 ]

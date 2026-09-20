@@ -4,10 +4,10 @@ Reports whether the process can actually reach the things it needs, rather than
 merely whether it is running. Consumed by the container healthcheck, by Nginx
 during a deployment, and by the uptime monitor on the server (task 4.8).
 
-This is the one route on the platform that is deliberately unauthenticated: a
-load balancer cannot present a Canvas session. It therefore reveals nothing
-beyond reachability — no versions, no hostnames, no configuration, and no error
-detail from the underlying exception.
+Deliberately unauthenticated: a load balancer cannot present a Canvas session.
+It therefore reveals nothing beyond reachability — no versions, no hostnames, no
+configuration, and no error detail from the underlying exception. The only other
+unauthenticated route is /lti/jwks/, which publishes public keys by definition.
 """
 
 from __future__ import annotations

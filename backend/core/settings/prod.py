@@ -7,8 +7,8 @@ not optional or overridable to something weaker.
 
 from __future__ import annotations
 
-from config.settings.base import *
-from config.settings.env import ImproperlyConfigured, get_bool, get_int, get_list, get_str
+from core.settings.base import *
+from core.settings.env import ImproperlyConfigured, get_bool, get_int, get_list, get_str
 
 DEBUG = False
 
@@ -46,11 +46,9 @@ SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
 # with Secure. Task 1.9 owns the launch cookie itself and task 1.10 the
 # new-window fallback for browsers that block third-party cookies outright.
 
-SESSION_COOKIE_SECURE = True
-SESSION_COOKIE_SAMESITE = "None"
-CSRF_COOKIE_SECURE = True
-CSRF_COOKIE_SAMESITE = "None"
-CSRF_COOKIE_HTTPONLY = False  # the frontend must read the token to send it back
+# Cookie flags are set in base.py: the iframe needs them everywhere, not only
+# here, and a setting that differs between environments is one that is only
+# ever tested in one of them.
 
 # --- Static ----------------------------------------------------------------
 # Hashed filenames with a manifest, so Nginx can cache static assets

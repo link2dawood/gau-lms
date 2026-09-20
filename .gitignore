@@ -84,6 +84,14 @@ blob-report/
 *.key
 !**/fixtures/**/*.example.pem
 secrets/
+# Canvas platform registrations (LTI_PLATFORMS_FILE). Names a specific
+# institution's Canvas and its developer key client id — configuration, not
+# code (task 1.2).
+lti-platforms.json
+lti-platforms.*.json
+# The tool's own RSA private keys (LTI_TOOL_KEY_DIR). *.key and *.pem above
+# already cover the files; this covers the directory (task 1.3).
+lti-keys/
 
 # ---------------------------------------------------------------------------
 # Docker / local infrastructure volumes
@@ -119,3 +127,6 @@ Thumbs.db
 # ---------------------------------------------------------------------------
 scratch/
 tmp/
+
+# Local screenshots and captures — never committed
+screenshots/

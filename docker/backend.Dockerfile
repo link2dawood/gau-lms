@@ -43,7 +43,7 @@ WORKDIR /app
 # ---------------------------------------------------------------------- dev
 FROM base AS dev
 
-ENV DJANGO_SETTINGS_MODULE=config.settings.dev
+ENV DJANGO_SETTINGS_MODULE=core.settings.dev
 
 # Dependency manifest only, so the install layer is cached until it changes.
 COPY backend/pyproject.toml ./
@@ -51,12 +51,12 @@ RUN pip install ".[dev]"
 
 # Source is bind-mounted over /app by compose; nothing is copied in.
 EXPOSE 8000
-CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--reload"]
+CMD ["gunicorn", "core.wsgi:application", "--bind", "0.0.0.0:8000", "--reload"]
 
 # --------------------------------------------------------------------- prod
 FROM base AS prod
 
-ENV DJANGO_SETTINGS_MODULE=config.settings.prod
+ENV DJANGO_SETTINGS_MODULE=core.settings.prod
 
 COPY backend/pyproject.toml ./
 RUN pip install "."
@@ -72,4 +72,4 @@ RUN groupadd --system --gid 1001 app \
 USER app
 
 EXPOSE 8000
-CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000"]
+CMD ["gunicorn", "core.wsgi:application", "--bind", "0.0.0.0:8000"]

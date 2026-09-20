@@ -95,7 +95,7 @@ jobs:
 
       - name: pytest
         working-directory: backend
-        run: pytest --cov=config --cov=apps --cov-report=term-missing
+        run: pytest --cov=core --cov=apps --cov-report=term-missing
 
   # ---------------------------------------------------------------------------
   frontend:

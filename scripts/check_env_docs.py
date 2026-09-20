@@ -8,7 +8,7 @@ advertising it, so someone configures something that does nothing.
 
 This compares three sources and fails if they disagree:
 
-  * variables the Django settings read, through config/settings/env.py
+  * variables the Django settings read, through core/settings/env.py
   * variables docker-compose.yml and its override interpolate
   * variables the frontend reads from process.env
 

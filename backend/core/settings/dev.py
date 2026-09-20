@@ -7,8 +7,8 @@ search engine are the same as deployed, so a launch bug reproduces locally.
 
 from __future__ import annotations
 
-from config.settings.base import *
-from config.settings.env import get_bool, get_list
+from core.settings.base import *
+from core.settings.env import get_bool, get_list
 
 DEBUG = get_bool("DJANGO_DEBUG", True)
 
@@ -19,8 +19,10 @@ ALLOWED_HOSTS = get_list(
 
 # Nginx terminates plain HTTP locally, so cookies cannot be Secure-only or the
 # browser would discard them. Production overrides all three.
-SESSION_COOKIE_SECURE = False
-CSRF_COOKIE_SECURE = False
+# Cookie security is NOT relaxed here. SameSite=None requires Secure, so
+# turning Secure off would stop the session cookie being set at all and break
+# the iframe launch this project exists to serve — locally as well as in
+# production. Use http://localhost, http://127.0.0.1, or HTTPS.
 SECURE_SSL_REDIRECT = False
 
 CSRF_TRUSTED_ORIGINS = get_list(

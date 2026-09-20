@@ -12,7 +12,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from config.settings.env import (
+from psycopg import IsolationLevel
+
+from core.settings.env import (
     get_int,
     get_list,
     get_str,
@@ -21,7 +23,7 @@ from config.settings.env import (
     require_str,
 )
 
-# backend/config/settings/base.py -> backend/
+# backend/core/settings/base.py -> backend/
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 # ---------------------------------------------------------------------------
@@ -36,23 +38,17 @@ DEBUG = False
 
 ALLOWED_HOSTS = get_list("DJANGO_ALLOWED_HOSTS", [])
 
-ROOT_URLCONF = "config.urls"
-WSGI_APPLICATION = "config.wsgi.application"
-ASGI_APPLICATION = "config.asgi.application"
+ROOT_URLCONF = "core.urls"
+WSGI_APPLICATION = "core.wsgi.application"
+ASGI_APPLICATION = "core.asgi.application"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# AUTH_USER_MODEL is deliberately NOT set here. Canvas is the authority for
-# identity (architecture rule C.5), so the platform's user record carries
-# Canvas fields and will be a custom model — but Django resolves
-# AUTH_USER_MODEL eagerly during system checks, so it can only be declared once
-# apps.accounts exists.
-#
-# Task 1.1 creates apps.accounts.User, sets AUTH_USER_MODEL here, and runs the
-# first migration in the same change. NO MIGRATION MAY BE APPLIED BEFORE THEN:
-# migrating now would bake django.contrib.auth's default User into the
-# migration state and turn a one-line setting into a data migration.
-# See DECISIONS.md D-009.
+# Canvas is the authority for identity (architecture rule C.5), so the user
+# record is the platform's own model, keyed on the Canvas identity, with no
+# usable password for readers. Declared together with the model and its first
+# migration (DECISIONS.md D-009).
+AUTH_USER_MODEL = "accounts.User"
 
 # ---------------------------------------------------------------------------
 # Applications
@@ -75,19 +71,28 @@ THIRD_PARTY_APPS = [
     "rest_framework",
 ]
 
+# Still to come, each added by the task that builds it: versioning (2.4),
+# reader (2.9), search (2.11), cms (3.1), imports (3.11). Each needs a
+# MIGRATION_MODULES entry in the same change.
 LOCAL_APPS: list[str] = [
-    # "apps.accounts",    task 1.1
-    # "apps.lti",         task 1.2
-    # "apps.courses",     task 1.6
-    # "apps.content",     task 2.1
-    # "apps.versioning",  task 2.4
-    # "apps.reader",      task 2.9
-    # "apps.search",      task 2.11
-    # "apps.cms",         task 3.1
-    # "apps.imports",     task 3.11
+    "apps.accounts",
+    "apps.lti",
+    "apps.courses",
+    "apps.content",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
+
+# Migrations live in one place, backend/migrations/<app label>/, rather than
+# inside each app (DECISIONS.md D-024). Django only looks there because of this
+# mapping: an app added to LOCAL_APPS without an entry here is silently treated
+# as having no migrations, and its tables are never created.
+MIGRATION_MODULES = {
+    "accounts": "migrations.accounts",
+    "lti": "migrations.lti",
+    "courses": "migrations.courses",
+    "content": "migrations.content",
+}
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
@@ -97,8 +102,17 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    # apps.lti.middleware.CourseScopeMiddleware is inserted by task 1.11.
+    # After authentication, deliberately: a course scope without an
+    # authenticated user is meaningless, and treating one as valid would
+    # hand a course context to an anonymous request.
+    "apps.lti.middleware.CourseScopeMiddleware",
 ]
+
+# Note before adding a CORS layer here: POST /lti/session/ is exempt from
+# Django's CSRF check and relies on a custom request header that a
+# cross-site form cannot set and a cross-origin fetch cannot get past a
+# preflight this origin does not answer. A permissive CORS_ALLOW_HEADERS
+# would remove that defence with nothing failing (D-038).
 
 TEMPLATES = [
     {
@@ -121,6 +135,17 @@ TEMPLATES = [
 
 DATABASES = {"default": parse_database_url(require_str("DATABASE_URL"))}
 
+# Pin the isolation level rather than inheriting whatever the server or a
+# connection pooler has as its default.
+#
+# Launch provisioning depends on READ COMMITTED semantics: when two first
+# launches race, the loser's INSERT blocks on the winner's uncommitted row and
+# only raises once the winner has committed — so the re-read that follows can
+# see it. Under REPEATABLE READ the whole transaction shares one snapshot taken
+# before that commit, the re-read finds nothing, and a legitimate launch fails.
+# See utils/db.py and DECISIONS.md D-034.
+DATABASES["default"].setdefault("OPTIONS", {})["isolation_level"] = IsolationLevel.READ_COMMITTED
+
 # ---------------------------------------------------------------------------
 # Cache, sessions and Celery
 #
@@ -130,23 +155,66 @@ DATABASES = {"default": parse_database_url(require_str("DATABASE_URL"))}
 
 REDIS_CACHE_URL = parse_redis_url(require_str("REDIS_CACHE_URL"))
 LTI_STATE_REDIS_URL = parse_redis_url(require_str("LTI_STATE_REDIS_URL"))
+SESSION_REDIS_URL = parse_redis_url(require_str("SESSION_REDIS_URL"))
+
+# Named once so nothing has to spell it twice.
+LTI_STATE_CACHE_ALIAS = "lti_state"
+SESSION_CACHE_ALIAS = "sessions"
 
 CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.redis.RedisCache",
         "LOCATION": REDIS_CACHE_URL,
         "KEY_PREFIX": "gau",
-    }
+    },
+    # OIDC state and nonces for launches in flight (task 1.4). Its own Redis
+    # logical database, so clearing the page cache cannot invalidate a handshake
+    # half-way through — or, worse, drop the nonce that prevents a launch being
+    # replayed. Entries expire; see apps/lti/tool_conf.py for the lifetime.
+    LTI_STATE_CACHE_ALIAS: {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": LTI_STATE_REDIS_URL,
+        "KEY_PREFIX": "lti",
+    },
+    # Sessions, on a database of their own for the same reason and a sharper
+    # one: a session is not cache. Sharing the page cache means that clearing a
+    # stale page — a routine, low-stakes operation — signs every reader out
+    # mid-chapter, and that memory pressure can evict a session under an LRU
+    # policy. Neither failure announces itself as anything but "I got logged
+    # out". See DECISIONS.md D-039.
+    SESSION_CACHE_ALIAS: {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": SESSION_REDIS_URL,
+        "KEY_PREFIX": "session",
+    },
 }
 
 SESSION_ENGINE = "django.contrib.sessions.backends.cache"
-SESSION_CACHE_ALIAS = "default"
 SESSION_COOKIE_NAME = "gau_session"
 # A Canvas launch is a working session, not a long-lived login. Task 1.9
 # narrows the cookie further for the iframe context.
 SESSION_COOKIE_AGE = get_int("SESSION_COOKIE_AGE", 60 * 60 * 12)
 SESSION_COOKIE_HTTPONLY = True
 SESSION_SAVE_EVERY_REQUEST = True
+
+# The reader runs inside a Canvas iframe, which makes every request to this
+# platform a cross-site one. A cookie without SameSite=None is simply not sent,
+# and browsers reject SameSite=None unless the cookie is also Secure — so these
+# two travel together and belong in base, not in production settings alone.
+# Getting this wrong does not fail loudly: the launch works, and then every
+# subsequent request arrives anonymous.
+#
+# Locally this means the platform must be reached over http://localhost or
+# http://127.0.0.1, which browsers treat as secure contexts, or over HTTPS.
+# A LAN address will silently drop the session.
+SESSION_COOKIE_SAMESITE = "None"
+SESSION_COOKIE_SECURE = True
+
+# The same reasoning for CSRF, except that the frontend has to read this one to
+# echo it back, so it is deliberately not HttpOnly.
+CSRF_COOKIE_SAMESITE = "None"
+CSRF_COOKIE_SECURE = True
+CSRF_COOKIE_HTTPONLY = False
 
 CELERY_BROKER_URL = parse_redis_url(require_str("CELERY_BROKER_URL"))
 CELERY_RESULT_BACKEND = parse_redis_url(require_str("CELERY_RESULT_BACKEND"))
@@ -159,6 +227,20 @@ CELERY_TASK_TRACK_STARTED = True
 CELERY_RESULT_EXTENDED = True
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 CELERY_TIMEZONE = "UTC"
+
+# Scheduled work. Canvas is authoritative for enrolment, but it does not tell
+# us when someone leaves — only a roster read does (task 1.13). Six hours is a
+# deliberate compromise: a departed student keeps access for at most that long,
+# and the platform is not polling Canvas for every course every few minutes.
+# A launch still reconciles the launching user immediately.
+ROSTER_SYNC_INTERVAL_SECONDS = get_int("ROSTER_SYNC_INTERVAL_SECONDS", 6 * 60 * 60)
+
+CELERY_BEAT_SCHEDULE = {
+    "sync-canvas-rosters": {
+        "task": "apps.lti.tasks.sync_all_rosters",
+        "schedule": ROSTER_SYNC_INTERVAL_SECONDS,
+    },
+}
 
 # ---------------------------------------------------------------------------
 # Search
@@ -311,6 +393,20 @@ PLATFORM_BASE_URL = require_str("PLATFORM_BASE_URL").rstrip("/")
 # Canvas hosts permitted to embed the reader in an iframe. Enforced as a
 # Content-Security-Policy frame-ancestors directive in task 4.4.
 CANVAS_FRAME_ANCESTORS = get_list("CANVAS_FRAME_ANCESTORS", [])
+
+# Which Canvas platforms this tool trusts. A path to a JSON file listing the
+# registrations, read by `manage.py sync_lti_platforms` and written into the
+# lti_ltiplatform table. Issuers, client ids and deployment ids are deployment
+# facts, never literals in code (rule C.6), and the file is deliberately not a
+# settings value itself: it holds several records, changes on its own schedule,
+# and belongs in a mounted file rather than a process environment.
+LTI_PLATFORMS_FILE = get_str("LTI_PLATFORMS_FILE")
+
+# Where this tool's own RSA private keys live, one PEM per key named by its
+# kid. Files rather than database rows, because a database dump travels much
+# more freely than a key file (DECISIONS.md D-026). Generated by
+# `manage.py create_lti_key`; the public halves are published at /lti/jwks/.
+LTI_TOOL_KEY_DIR = Path(get_str("LTI_TOOL_KEY_DIR") or BASE_DIR / "lti-keys")
 
 APPEND_SLASH = True
 X_FRAME_OPTIONS = "DENY"  # relaxed for the launch routes only, in task 4.4

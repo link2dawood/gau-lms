@@ -17,6 +17,8 @@ dependencies = [
     "celery[redis]>=5.4,<6.0",       # background jobs
     "redis>=5.0,<7.0",               # cache, LTI state, Celery transport
     "gunicorn>=23.0,<24.0",
+    "cryptography>=42,<48",          # tool RSA keypair and JWKS (task 1.3)
+    "pylti1p3>=2.0,<3.0",            # LTI 1.3 handshake and launch validation
 ]
 
 [project.optional-dependencies]
@@ -31,7 +33,7 @@ dev = [
     "djangorestframework-stubs>=3.15,<4.0",
 ]
 
-# The Django project is not installed as a package: `config` and `apps` are
+# The Django project is not installed as a package: `core` and `apps` are
 # imported from PYTHONPATH=/app (see docker/backend.Dockerfile and
 # DECISIONS.md D-010). This file is the dependency manifest and tool
 # configuration only.
@@ -42,7 +44,7 @@ py-modules = []
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-extend-exclude = ["**/migrations/*"]
+extend-exclude = ["migrations/**"]
 
 [tool.ruff.lint]
 select = [
@@ -62,10 +64,10 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "**/tests/**" = ["S105", "S106"]        # test fixtures may carry literal secrets
-"config/settings/*" = ["F403", "F405"]  # settings modules star-import their base
+"core/settings/*" = ["F403", "F405"]  # settings modules star-import their base
 
 [tool.ruff.lint.isort]
-known-first-party = ["config", "apps"]
+known-first-party = ["core", "apps", "services", "utils"]
 
 # --------------------------------------------------------------------- mypy
 [tool.mypy]
@@ -76,7 +78,7 @@ warn_unreachable = true
 exclude = ['migrations/']
 
 [[tool.mypy.overrides]]
-module = ["*.migrations.*"]
+module = ["migrations.*"]
 ignore_errors = true
 
 # Celery ships no py.typed marker, so mypy will not analyse it by default.
@@ -87,15 +89,23 @@ ignore_errors = true
 module = ["celery.*"]
 follow_untyped_imports = true
 
-# Celery's own API is untyped upstream, so strict mode rejects every call into
-# it. The relaxation is confined to the one module that constructs the app;
-# task modules and every other file stay fully strict, so this cannot spread.
+# PyLTI1p3 is annotated throughout but has not been confirmed to ship a py.typed
+# marker. Following it regardless infers real signatures instead of collapsing
+# the library to Any, which matters for the launch validation in task 1.5.
 [[tool.mypy.overrides]]
-module = ["config.celery"]
+module = ["pylti1p3.*"]
+follow_untyped_imports = true
+
+# Celery's own API is untyped upstream, so strict mode rejects every call into
+# it. The relaxation covers the module that constructs the app and the task
+# modules that decorate with it — the only places that call Celery directly.
+# Everything else stays fully strict, so this cannot spread into business logic.
+[[tool.mypy.overrides]]
+module = ["core.celery", "apps.*.tasks"]
 disable_error_code = ["no-untyped-call"]
 
 [tool.django-stubs]
-django_settings_module = "config.settings.dev"
+django_settings_module = "core.settings.dev"
 
 # -------------------------------------------------------------------- pytest
 [tool.pytest.ini_options]
@@ -105,4 +115,4 @@ testpaths = ["tests", "apps"]
 # reads the environment first: a developer's .env, or the compose environment,
 # would otherwise silently run the suite under dev settings. The command line
 # wins over both, so the suite always uses test settings.
-addopts = "--strict-markers --strict-config -ra --ds=config.settings.test"
+addopts = "--strict-markers --strict-config -ra --ds=core.settings.test"

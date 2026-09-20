@@ -115,7 +115,7 @@ services:
     #
     # See DECISIONS.md D-020.
     command: >
-      gunicorn config.wsgi:application
+      gunicorn core.wsgi:application
         --bind 0.0.0.0:8000
         --workers ${GUNICORN_WORKERS:-2}
         --timeout ${GUNICORN_TIMEOUT:-60}
@@ -132,7 +132,7 @@ services:
   celery_worker:
     <<: *backend-image
     # Imports, search indexing and roster sync. Never inline in a request.
-    command: celery -A config.celery worker --loglevel=INFO --concurrency=${CELERY_CONCURRENCY:-2}
+    command: celery -A core.celery worker --loglevel=INFO --concurrency=${CELERY_CONCURRENCY:-2}
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
@@ -142,7 +142,7 @@ services:
   celery_beat:
     <<: *backend-image
     # Scheduled work: NRPS roster synchronisation (task 1.13).
-    command: celery -A config.celery beat --loglevel=INFO --schedule=/tmp/celerybeat-schedule
+    command: celery -A core.celery beat --loglevel=INFO --schedule=/tmp/celerybeat-schedule
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}

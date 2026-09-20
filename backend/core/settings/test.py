@@ -7,7 +7,7 @@ that make a suite fast and deterministic.
 
 from __future__ import annotations
 
-from config.settings.dev import *
+from core.settings.dev import *
 
 DEBUG = False
 
@@ -22,11 +22,16 @@ CELERY_TASK_EAGER_PROPAGATES = True
 
 # In-memory cache, so one test cannot see another's keys and a developer's
 # running stack is untouched by the suite.
+# Every alias the application asks for must exist here too. A missing one does
+# not fail as a configuration error at startup — it raises the first time a
+# test touches that cache, which reads as a broken test rather than broken
+# settings.
 CACHES = {
-    "default": {
+    alias: {
         "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
-        "LOCATION": "gau-test",
+        "LOCATION": f"gau-test-{alias}",
     }
+    for alias in ("default", LTI_STATE_CACHE_ALIAS, SESSION_CACHE_ALIAS)
 }
 SESSION_ENGINE = "django.contrib.sessions.backends.db"
 
