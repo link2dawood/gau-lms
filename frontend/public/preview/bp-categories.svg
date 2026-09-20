@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 190" font-family="IBM Plex Sans, Arial, sans-serif">
+  <title>Systolic blood pressure categories</title>
+  <rect width="720" height="190" fill="#FFFFFF"/>
+  <!-- scale: 90 mmHg at x=40, 190 mmHg at x=680 → 6.4 px per mmHg -->
+  <rect x="40"  y="40" width="192" height="44" fill="#DCEBEE"/>
+  <rect x="232" y="40" width="64"  height="44" fill="#B9D7DD"/>
+  <rect x="296" y="40" width="64"  height="44" fill="#8FBDC6"/>
+  <rect x="360" y="40" width="256" height="44" fill="#2A7F8F"/>
+  <rect x="616" y="40" width="64"  height="44" fill="#A8322D"/>
+  <g font-size="13" fill="#1C2B3A">
+    <text x="136" y="67" text-anchor="middle">Normal</text>
+    <text x="264" y="67" text-anchor="middle">Elevated</text>
+    <text x="328" y="67" text-anchor="middle">Stage 1</text>
+    <text x="488" y="67" text-anchor="middle" fill="#FFFFFF">Stage 2</text>
+    <text x="648" y="67" text-anchor="middle" fill="#FFFFFF">Crisis</text>
+  </g>
+  <g stroke="#9AA8B3" stroke-width="1">
+    <line x1="40" y1="96" x2="680" y2="96"/>
+    <line x1="40"  y1="92" x2="40"  y2="100"/>
+    <line x1="232" y1="92" x2="232" y2="100"/>
+    <line x1="296" y1="92" x2="296" y2="100"/>
+    <line x1="360" y1="92" x2="360" y2="100"/>
+    <line x1="616" y1="92" x2="616" y2="100"/>
+    <line x1="680" y1="92" x2="680" y2="100"/>
+  </g>
+  <g font-size="12" fill="#5D6B78" text-anchor="middle">
+    <text x="40"  y="118">90</text>
+    <text x="232" y="118">120</text>
+    <text x="296" y="118">130</text>
+    <text x="360" y="118">140</text>
+    <text x="616" y="118">180</text>
+    <text x="680" y="118">190</text>
+  </g>
+  <text x="360" y="150" font-size="12" fill="#5D6B78" text-anchor="middle">Systolic pressure, mmHg</text>
+</svg>

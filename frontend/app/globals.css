@@ -3,23 +3,25 @@
 @tailwind utilities;
 
 /*
- * Design tokens. GAU branding (task 4.5) replaces these values; no component
+ * Design tokens. Navy and teal come from GAU's own Phase 1 plan document;
+ * final branding assets replace these values in task 4.5, and no component
  * hard-codes a colour.
  *
  * Channels are space-separated RGB so Tailwind's <alpha-value> works.
  */
 @layer base {
   :root {
-    --color-surface: 255 255 255;
-    --color-surface-muted: 246 247 249;
-    --color-ink: 26 32 44;
-    --color-ink-muted: 90 100 116;
-    --color-accent: 27 61 110;
-    --color-border: 222 226 232;
-    --color-danger: 176 32 36;
+    --color-surface: 255 255 255;        /* page */
+    --color-surface-muted: 246 248 249;  /* canvas behind pages, #F6F8F9 */
+    --color-ink: 28 43 58;               /* body text, #1C2B3A */
+    --color-ink-muted: 93 107 120;       /* secondary text, #5D6B78 */
+    --color-navy: 31 58 95;              /* GAU navy, #1F3A5F */
+    --color-accent: 42 127 143;          /* GAU teal, #2A7F8F: interaction, progress */
+    --color-border: 216 224 230;         /* rules, #D8E0E6 */
+    --color-danger: 168 50 45;           /* clinical alerts only, #A8322D */
 
-    --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-    --font-serif: ui-serif, Georgia, Cambria, 'Times New Roman', serif;
+    --font-sans: var(--font-plex), ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --font-serif: var(--font-literata), ui-serif, Georgia, Cambria, serif;
   }
 
   html {
@@ -38,5 +40,12 @@
   :focus-visible {
     @apply outline-2 outline-offset-2 outline-accent;
     outline-style: solid;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      transition-duration: 0.01ms !important;
+      animation-duration: 0.01ms !important;
+    }
   }
 }

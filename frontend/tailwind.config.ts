@@ -18,6 +18,7 @@ const config: Config = {
         'surface-muted': 'rgb(var(--color-surface-muted) / <alpha-value>)',
         ink: 'rgb(var(--color-ink) / <alpha-value>)',
         'ink-muted': 'rgb(var(--color-ink-muted) / <alpha-value>)',
+        navy: 'rgb(var(--color-navy) / <alpha-value>)',
         accent: 'rgb(var(--color-accent) / <alpha-value>)',
         border: 'rgb(var(--color-border) / <alpha-value>)',
         danger: 'rgb(var(--color-danger) / <alpha-value>)',
