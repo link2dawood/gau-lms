@@ -1,0 +1,49 @@
+{% comment %}
+Every page the LTI endpoints render, success or failure.
+
+It is deliberately one template and deliberately plain: these pages appear
+inside a Canvas iframe before any of the reader's styling is loaded, and a
+launch that fails must say something a student can act on without needing a
+developer to interpret it. Detail that would help an attacker map the handshake
+stays in the log; what is shown here is the category and what to do next.
+{% endcomment %}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ title }}</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    margin: 0; min-height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px;
+    font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: #f7f7f5; color: #1b1b1a;
+  }
+  main { max-width: 34rem; }
+  h1 { font-size: 1.35rem; margin: 0 0 .5rem; }
+  p { margin: 0 0 1rem; }
+  dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: .25rem 1rem; }
+  dt { color: #5c5c58; }
+  dd { margin: 0; }
+  .hint { color: #5c5c58; font-size: .9rem; }
+  @media (prefers-color-scheme: dark) {
+    body { background: #1b1b1a; color: #f0efec; }
+    dt, .hint { color: #a3a29c; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>{{ title }}</h1>
+  <p>{{ message }}</p>
+  {% if details %}
+  <dl>
+    {% for label, value in details %}<dt>{{ label }}</dt><dd>{{ value }}</dd>{% endfor %}
+  </dl>
+  {% endif %}
+  {% if hint %}<p class="hint">{{ hint }}</p>{% endif %}
+</main>
+</body>
+</html>
