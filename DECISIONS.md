@@ -1743,3 +1743,44 @@ slightly irregular tree should be fixable rather than rejected at the row.
   chain is a tree that disagrees with itself, and nothing will complain.
 - **Task 2.9's `ReadingPosition` must reference a node by uuid**, never by
   path. A reorder changes paths; it must not move anyone's place in the book.
+
+---
+
+## D-055 — The tree service reads once and derives the rest in memory
+
+**Date:** 2026-09-20 · **Task:** 2.3
+
+`reading_order` is one `ORDER BY path` query. The table of contents, the
+breadcrumb and previous/next are derived from that one result.
+
+**Why `neighbours` takes the order rather than querying for it.** The caller
+already holds it — the reader renders the contents sidebar on every page. More
+importantly, it means the publication filter is applied **once, in one place**:
+task 2.6 filters the reading order to published nodes, and prev/next then
+cannot navigate to a draft, because a node that is not in the list has no
+neighbours rather than the wrong ones. Querying independently would have meant
+remembering the same filter in two places, and the failure would have been a
+student reaching an unpublished chapter through the Next button.
+
+**Why nesting is by depth, not by parent id.** A filtered list nests without a
+second pass. It also means a node whose parent is missing attaches to the
+nearest shallower entry rather than disappearing — imports produce irregular
+trees (task 3.13), and a chapter silently absent from the contents is a worse
+outcome than one shown a level too high.
+
+**Executed on this host**, from the shipped code: a six-node book nests
+correctly, prev/next crosses both a chapter and a unit boundary, the first and
+last nodes have one side only, a node absent from the order has neither, and an
+irregular tree still renders every node.
+
+**Consequences:**
+
+- **Task 2.6 must pass a published-only order into `neighbours`.** That is the
+  single point where rule C.9 is enforced for navigation.
+- A textbook has hundreds of nodes, not millions. If a book ever grew past
+  that, `neighbours` would want an indexed `path <` / `path >` lookup instead —
+  the path already supports it, so it is a change of implementation, not of
+  model.
+- `ancestors_of` still queries, for callers that hold a node but not the order
+  — deep link resolution, for instance. It costs no query at all for a
+  top-level node.

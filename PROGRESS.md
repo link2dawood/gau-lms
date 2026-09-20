@@ -8,7 +8,7 @@ A task is `BLOCKED` with the specific question recorded inline, so the next loop
 does not repeat the work.
 
 **Current status:** Stage 1 built; Stage 2 started. **0.8**, **1.1**–**1.17**,
-**2.1** and **2.2** are implemented. Everything awaits a Docker test run — including the
+**2.1**–**2.3** are implemented. Everything awaits a Docker test run — including the
 suite itself, which is written but has never been executed.
 
 ---
@@ -1103,7 +1103,7 @@ brings role constants, 4.4 brings rate limiting. An empty directory is a stub.
 |---|---|---|---|
 | 2.1 | `content.Book` model: uuid, title, slug, description, status, created/updated | 0.3 | **IN PROGRESS** |
 | 2.2 | `content.ContentNode` model: uuid, book fk, parent fk, node_type (UNIT, CHAPTER, SECTION, SUBSECTION), title, position, materialised ancestry for efficient tree reads | 2.1 | **IN PROGRESS** |
-| 2.3 | Tree service: full TOC in one query, resolve ancestors, flat reading order, next and previous across sibling and parent boundaries | 2.2 | TODO |
+| 2.3 | Tree service: full TOC in one query, resolve ancestors, flat reading order, next and previous across sibling and parent boundaries | 2.2 | **IN PROGRESS** |
 | 2.4 | `versioning.ContentVersion` model: uuid, node fk, version_number, body (JSONB Tiptap), created_by, created_at, change_note, is_published, previous_version fk | 2.2 | TODO |
 | 2.5 | `courses.CourseBook` mapping model plus service resolving which book a launched course opens | 2.1, 1.6 | TODO |
 | 2.6 | Read API: `GET /api/books/:id/toc`, `GET /api/nodes/:id` returning published body plus prev/next, course-scoped and permission-checked | 2.3, 2.5, 1.11 | TODO |
@@ -1160,6 +1160,35 @@ parent boundary needs no special case at all. That last one is what pays for
 the design.
 
 11 tests added (129 in the suite), still unrun.
+
+**2.3 notes: implemented and host-checked; not committed.**
+`apps/content/services.py` is the content module's public face:
+`reading_order` (one query), `table_of_contents` (nested from it),
+`ancestors_of` (one IN query on path prefixes) and `neighbours`.
+
+**`neighbours` takes the reading order rather than querying** (D-055). The
+caller already holds it for the contents sidebar, and it means the publication
+filter is applied once: task 2.6 filters the order, and prev/next then cannot
+navigate to a draft, because a node absent from the list has no neighbours
+rather than the wrong ones.
+
+Nesting is by depth, not parent id, so a filtered list nests without a second
+pass and an irregular import still renders every node.
+
+**Executed on this host** from the shipped code — a six-node book nests
+correctly, prev/next crosses both a chapter and a unit boundary, the first and
+last nodes have one side only, a node outside the order has neither, and a tree
+with a skipped level still shows every node.
+
+16 tests added (145 in the suite), including two that assert the query count.
+
+**Owed before 2.3 can be marked DONE:** `migrate`, `mypy .`, `pytest` — the
+query-count assertions in particular are the kind that only a real run settles.
+
+**Points the next loops must respect:**
+
+- **Task 2.6 must pass a published-only reading order into `neighbours`.** That
+  is the single point where published-only navigation is enforced.
 
 **Owed before 2.2 can be marked DONE:** `makemigrations --check`, `migrate`,
 `mypy .`, `pytest`.
