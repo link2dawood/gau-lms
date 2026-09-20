@@ -74,12 +74,7 @@ class TestConfiguration:
         which a Canvas iframe launch requires (task 1.9)."""
         assert settings.SECURE_PROXY_SSL_HEADER == ("HTTP_X_FORWARDED_PROTO", "https")
 
-    def test_no_custom_user_model_is_declared_yet(self) -> None:
-        """Guards D-009.
-
-        AUTH_USER_MODEL and apps.accounts.User must land together in task 1.1.
-        If this test fails because the setting appeared without the app, the
-        project will not boot; if it fails because 1.1 has landed, delete it.
-        """
-        assert settings.AUTH_USER_MODEL == "auth.User"
-        assert "apps.accounts" not in settings.INSTALLED_APPS
+    def test_the_custom_user_model_is_active(self) -> None:
+        """D-009: the setting, the app and the model are declared together."""
+        assert settings.AUTH_USER_MODEL == "accounts.User"
+        assert "apps.accounts" in settings.INSTALLED_APPS

@@ -1,0 +1,127 @@
+"""Test data factories and launch fixtures.
+
+Factories build rows the way the platform would, not the way a fixture file
+would: a user gets a Canvas identity and an unusable password, exactly as
+launch provisioning creates one.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+import factory
+from django.contrib.auth import get_user_model
+
+from apps.content.models import Book, BookStatus, ContentNode, NodeType
+from apps.courses.models import Course, CourseMembership, Role
+from apps.lti.models import LtiPlatform
+from apps.lti.services import (
+    CLAIM_CONTEXT,
+    CLAIM_DEPLOYMENT_ID,
+    CLAIM_MESSAGE_TYPE,
+    CLAIM_NRPS,
+    CLAIM_ROLES,
+    CLAIM_TOOL_PLATFORM,
+)
+
+User = get_user_model()
+
+ISSUER = "https://canvas.instructure.com"
+PLATFORM_GUID = "abc.gau.instructure.com"
+DEPLOYMENT_ID = "12:abc"
+LEARNER = "http://purl.imsglobal.org/vocab/lis/v2/membership#Learner"
+INSTRUCTOR = "http://purl.imsglobal.org/vocab/lis/v2/membership#Instructor"
+
+
+class UserFactory(factory.django.DjangoModelFactory):  # type: ignore[misc]
+    class Meta:
+        model = User
+        django_get_or_create = ("canvas_user_id",)
+
+    canvas_user_id = factory.Sequence(lambda n: f"canvas-sub-{n:06d}")
+    name = factory.Faker("name")
+    email = factory.Faker("email")
+    password = factory.django.Password(None)
+
+
+class LtiPlatformFactory(factory.django.DjangoModelFactory):  # type: ignore[misc]
+    class Meta:
+        model = LtiPlatform
+
+    issuer = ISSUER
+    client_id = factory.Sequence(lambda n: f"1000000000{n:04d}")
+    deployment_ids = factory.List([DEPLOYMENT_ID])
+    auth_login_url = "https://canvas.test/api/lti/authorize_redirect"
+    auth_token_url = "https://canvas.test/login/oauth2/token"
+    jwks_url = "https://canvas.test/api/lti/security/jwks"
+    is_active = True
+
+
+class CourseFactory(factory.django.DjangoModelFactory):  # type: ignore[misc]
+    class Meta:
+        model = Course
+
+    issuer = ISSUER
+    platform_guid = PLATFORM_GUID
+    canvas_course_id = factory.Sequence(lambda n: f"{4000 + n}")
+    title = factory.Sequence(lambda n: f"Course {n}")
+    label = factory.Sequence(lambda n: f"NURS-{100 + n}")
+
+
+class CourseMembershipFactory(factory.django.DjangoModelFactory):  # type: ignore[misc]
+    class Meta:
+        model = CourseMembership
+
+    course = factory.SubFactory(CourseFactory)
+    user = factory.SubFactory(UserFactory)
+    role = Role.STUDENT
+
+
+class BookFactory(factory.django.DjangoModelFactory):  # type: ignore[misc]
+    class Meta:
+        model = Book
+        django_get_or_create = ("slug",)
+
+    title = factory.Sequence(lambda n: f"Textbook {n}")
+    slug = factory.Sequence(lambda n: f"textbook-{n}")
+    description = ""
+    status = BookStatus.DRAFT
+
+
+class ContentNodeFactory(factory.django.DjangoModelFactory):  # type: ignore[misc]
+    """A node with a path already built, as the hierarchy service would leave it."""
+
+    class Meta:
+        model = ContentNode
+
+    book = factory.SubFactory(BookFactory)
+    parent = None
+    node_type = NodeType.UNIT
+    title = factory.Sequence(lambda n: f"Node {n}")
+    position = factory.Sequence(lambda n: n + 1)
+    path = factory.LazyAttribute(
+        lambda node: ContentNode.build_path(node.parent.path if node.parent else "", node.position)
+    )
+
+
+def launch_body(**overrides: Any) -> dict[str, Any]:
+    """A launch body shaped the way Canvas sends one.
+
+    Shared so that a test asserting on provisioning and a test asserting on
+    claim parsing cannot drift apart about what Canvas actually sends.
+    """
+    body: dict[str, Any] = {
+        "iss": ISSUER,
+        "sub": "535fa085-1a81-4c07-bb56-b0d4ae1c8e1c",
+        "name": "A Student",
+        "email": "student@gau.edu.tr",
+        "picture": "https://example.test/avatar.png",
+        CLAIM_CONTEXT: {"id": "4321", "title": "Fundamentals of Nursing", "label": "NURS-101"},
+        CLAIM_TOOL_PLATFORM: {"guid": PLATFORM_GUID},
+        CLAIM_NRPS: {"context_memberships_url": "https://canvas.test/memberships"},
+        CLAIM_DEPLOYMENT_ID: DEPLOYMENT_ID,
+        CLAIM_MESSAGE_TYPE: "LtiResourceLinkRequest",
+        CLAIM_ROLES: [LEARNER],
+    }
+    body.update(overrides)
+    return body

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from config.settings.env import (
+from core.settings.env import (
     ImproperlyConfigured,
     get_bool,
     get_int,
