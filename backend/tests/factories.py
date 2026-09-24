@@ -13,7 +13,7 @@ import factory
 from django.contrib.auth import get_user_model
 
 from apps.content.models import Book, BookStatus, ContentNode, NodeType
-from apps.courses.models import Course, CourseMembership, Role
+from apps.courses.models import Course, CourseBook, CourseMembership, Role
 from apps.lti.models import LtiPlatform
 from apps.lti.services import (
     CLAIM_CONTEXT,
@@ -87,6 +87,17 @@ class BookFactory(factory.django.DjangoModelFactory):  # type: ignore[misc]
     slug = factory.Sequence(lambda n: f"textbook-{n}")
     description = ""
     status = BookStatus.DRAFT
+
+
+class CourseBookFactory(factory.django.DjangoModelFactory):  # type: ignore[misc]
+    """A course pointing at the textbook it opens."""
+
+    class Meta:
+        model = CourseBook
+
+    course = factory.SubFactory(CourseFactory)
+    book = factory.SubFactory(BookFactory)
+    is_active = True
 
 
 class ContentNodeFactory(factory.django.DjangoModelFactory):  # type: ignore[misc]

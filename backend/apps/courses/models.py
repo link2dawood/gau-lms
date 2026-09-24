@@ -6,9 +6,10 @@ by hand or edited in an admin: rows appear when someone launches the tool
 title is a copy of what Canvas said, kept so the reader can name the course
 without a round trip, not a fact this platform owns.
 
-Neither model is ever deleted. A membership that disappears from the Canvas
+Nothing here is ever deleted. A membership that disappears from the Canvas
 roster is deactivated, because a reading position points at a person in a
-course, and deleting the membership would orphan it.
+course, and deleting the membership would orphan it; a course that moves to a
+different textbook deactivates the mapping it had, for the same reason.
 """
 
 from __future__ import annotations
@@ -134,3 +135,67 @@ class CourseMembership(models.Model):
 
     def __str__(self) -> str:
         return f"{self.user} in {self.course} as {self.role}"
+
+
+class CourseBook(models.Model):
+    """Which textbook a course opens.
+
+    A Canvas course and a book are owned by different modules and have entirely
+    different lifecycles — a course appears when someone launches, a book when
+    an editor creates one — so the relationship between them is its own row
+    rather than a column on either. That row is also the thing an administrator
+    changes between terms, and keeping it separate means changing it leaves a
+    trace instead of overwriting a field.
+
+    The book is named lazily, as a string, so this module never imports the
+    content module's models (rule C.1).
+
+    Resolving this into "the book this launch may read" is not done here: it
+    needs the content module's publication gate as well as this mapping, so it
+    belongs to neither module and lives in ``services/course_books.py``
+    (D-033).
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+
+    # PROTECT on both. A book that a course still points at must not be
+    # deletable, and neither must a course — the mapping is how a student's
+    # reading position is reached from a launch.
+    course = models.ForeignKey(Course, on_delete=models.PROTECT, related_name="book_links")
+    book = models.ForeignKey("content.Book", on_delete=models.PROTECT, related_name="course_links")
+
+    # False once a course moves to a different textbook. The row stays: which
+    # book a course opened last term is a real question, and nothing in this
+    # platform deletes a relationship a reading position was formed under.
+    is_active = models.BooleanField(default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        # Newest first, with an id tiebreak so the order is total. The review
+        # of 1.6 found a non-total ordering producing nondeterministic
+        # pagination over rows written in one transaction.
+        ordering = ("-created_at", "id")
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            # A course and a book are related once. Moving a course back to a
+            # textbook it used before reactivates that row rather than
+            # accumulating a second one saying the same thing.
+            models.UniqueConstraint(
+                fields=["course", "book"],
+                name="unique_course_book",
+            ),
+            # The question "which book does this course open" must have one
+            # answer. Enforced here rather than left to the service, because a
+            # second active mapping would make the reader's behaviour depend on
+            # row order.
+            models.UniqueConstraint(
+                fields=["course"],
+                condition=models.Q(is_active=True),
+                name="one_active_book_per_course",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        state = "" if self.is_active else " (inactive)"
+        return f"{self.course} opens {self.book}{state}"

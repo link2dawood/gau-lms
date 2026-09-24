@@ -14,20 +14,26 @@ from collections.abc import Iterable
 
 from django.contrib.auth.base_user import AbstractBaseUser
 from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.utils import timezone
 
-from apps.courses.models import Course, CourseMembership, Role
+from apps.content.services import Book
+from apps.courses.models import Course, CourseBook, CourseMembership, Role
 from utils.db import create_or_reread
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "Course",
+    "CourseBook",
     "CourseMembership",
     "Role",
+    "active_book_link",
     "courses_with_roster_service",
     "deactivate_memberships_absent_from",
+    "find_course",
     "get_course",
+    "link_course_to_book",
     "mark_roster_synced",
     "normalise_role",
     "upsert_course",
@@ -204,6 +210,21 @@ def upsert_membership(*, course: Course, user: AbstractBaseUser, role: Role) -> 
     return membership
 
 
+def find_course(*, issuer: str, platform_guid: str, canvas_course_id: str) -> Course | None:
+    """Look a course up by its Canvas identity without creating it.
+
+    The same three columns `upsert_course` keys on (D-032), but read-only. It
+    exists for callers that want to know whether a course is already known —
+    answering a deep linking request, for instance — where creating one as a
+    side effect of a question would be wrong.
+    """
+    if not canvas_course_id:
+        return None
+    return Course.objects.filter(
+        issuer=issuer, platform_guid=platform_guid, canvas_course_id=canvas_course_id
+    ).first()
+
+
 def get_course(course_id: str) -> Course | None:
     """Look a course up by internal id, or None.
 
@@ -245,3 +266,43 @@ def deactivate_memberships_absent_from(course: Course, present_user_ids: set[str
 def mark_roster_synced(course: Course) -> None:
     course.roster_synced_at = timezone.now()
     course.save(update_fields=["roster_synced_at", "updated_at"])
+
+
+def active_book_link(course: Course) -> CourseBook | None:
+    """The mapping naming the textbook this course currently opens, or None.
+
+    None means no book has been linked. It does **not** mean the book cannot be
+    read — that is the content module's publication gate, applied together with
+    this in ``services/course_books.py`` (D-053, D-033). Callers wanting the
+    answer to "may this launch read a textbook" want that function, not this
+    one.
+    """
+    return CourseBook.objects.filter(course=course, is_active=True).select_related("book").first()
+
+
+@transaction.atomic
+def link_course_to_book(course: Course, book: Book) -> CourseBook:
+    """Point a course at a textbook, replacing whatever it pointed at before.
+
+    **Deactivate first, then activate.** A partial unique index cannot be
+    `DEFERRABLE` in PostgreSQL — the same limitation D-054 hit with sibling
+    positions and D-056 with published versions — so activating the new mapping
+    while the old one is still active violates `one_active_book_per_course`
+    halfway through the transaction. The order here is the whole reason this
+    function exists rather than being left to each caller to rediscover.
+
+    Idempotent, and reversible without accumulating rows: re-linking a course to
+    a textbook it used before reactivates that mapping rather than creating a
+    second one saying the same thing.
+    """
+    CourseBook.objects.filter(course=course, is_active=True).exclude(book=book).update(
+        is_active=False, updated_at=timezone.now()
+    )
+
+    link = CourseBook.objects.filter(course=course, book=book).first()
+    if link is None:
+        return CourseBook.objects.create(course=course, book=book)
+    if not link.is_active:
+        link.is_active = True
+        link.save(update_fields=["is_active", "updated_at"])
+    return link

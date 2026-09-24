@@ -8,7 +8,7 @@ A task is `BLOCKED` with the specific question recorded inline, so the next loop
 does not repeat the work.
 
 **Current status:** Stage 1 built; Stage 2 started. **0.8**, **1.1**–**1.17**,
-**2.1**–**2.4** are implemented. Everything awaits a Docker test run — including the
+**2.1**–**2.5** are implemented. Everything awaits a Docker test run — including the
 suite itself, which is written but has never been executed.
 
 ---
@@ -1105,7 +1105,7 @@ brings role constants, 4.4 brings rate limiting. An empty directory is a stub.
 | 2.2 | `content.ContentNode` model: uuid, book fk, parent fk, node_type (UNIT, CHAPTER, SECTION, SUBSECTION), title, position, materialised ancestry for efficient tree reads | 2.1 | **IN PROGRESS** |
 | 2.3 | Tree service: full TOC in one query, resolve ancestors, flat reading order, next and previous across sibling and parent boundaries | 2.2 | **IN PROGRESS** |
 | 2.4 | `versioning.ContentVersion` model: uuid, node fk, version_number, body (JSONB Tiptap), created_by, created_at, change_note, is_published, previous_version fk | 2.2 | **IN PROGRESS** |
-| 2.5 | `courses.CourseBook` mapping model plus service resolving which book a launched course opens | 2.1, 1.6 | TODO |
+| 2.5 | `courses.CourseBook` mapping model plus service resolving which book a launched course opens | 2.1, 1.6 | **IN PROGRESS** |
 | 2.6 | Read API: `GET /api/books/:id/toc`, `GET /api/nodes/:id` returning published body plus prev/next, course-scoped and permission-checked | 2.3, 2.5, 1.11 | TODO |
 | 2.7 | Tiptap JSON renderer in React: headings, paragraphs, lists, tables with headers, figures with captions and alt text, blockquotes, callouts, references, links; every top-level node renders with `id={blockId}` | 0.4 | TODO |
 | 2.8 | Reader layout: collapsible TOC sidebar, breadcrumb, content pane, previous/next controls, mobile drawer TOC, sticky progress indicator | 2.6, 2.7 | TODO |
@@ -1296,6 +1296,112 @@ precedent). No import cycle — `content` does not reach back.
   draft whose `previous_version` is the current head. Which version it was
   restored *from* has no column and belongs in `change_note` until 3.7 decides
   it needs one.
+
+**2.5 notes: implemented and host-checked.** `courses.CourseBook`
+maps a course to the textbook it opens; `services/course_books.py` resolves that
+mapping into an answer the reader can act on. Model and migration compared
+mechanically: **6 of 6 fields, 2 of 2 constraints and the ordering agree**.
+
+**The mapping is a row, not a column** (D-057). A course and a book have
+different owners and different lifecycles, and the relationship is the thing an
+administrator changes between terms — so changing it deactivates a row and
+leaves a trace, rather than overwriting a field. Two constraints:
+`(course, book)` unique, so moving a course back to a previous textbook reuses
+that row; and one **active** mapping per course, so "which book does this course
+open" cannot have two answers.
+
+**The answer is a result, not a `Book | None`.** "This course has no textbook
+yet" and "the textbook is not published yet" need different screens and have
+different fixes — one is an administrator linking a book, the other publishing
+one. Flattening both to None would move that decision to a guess at the call
+site, which is the reasoning D-014 already applied on the frontend.
+
+**An unpublished book is withheld, not merely flagged.** `CourseBookResolution.book`
+is populated only when the book may be read, so a caller that ignores
+`availability` gets nothing rather than a draft textbook.
+
+**Executed on this host**, lifted from the shipped source by AST — **10 of 10
+cases**. `book_for_course`, 4 of 4: no mapping, a published book, a draft book
+and an archived book each resolve to the right availability, and the book is
+carried only in the first. `_deep_link_title`, 6 of 6 (below).
+
+**D-050's constant deep-link title is closed, which 2.5 owed.** Canvas's content
+picker now shows the book's own title. `find_course` is new — a read-only lookup
+on the D-032 identity, so that answering "which book does this course open"
+cannot create a course as a side effect; a deep linking request is answered
+before provisioning, and a question must not write a row.
+
+`_deep_link_title` **never raises**, following `audit.claims_of` (D-051). Three
+things go missing here legitimately — an account-level request carries no
+course, a course nobody has launched has no row, and a course may have no
+published book — and the generic title is a correct answer to all three. The
+unexpected is logged and swallowed too, so a database hiccup cannot turn a
+working deep linking request into an error page. Exercised on this host across
+all six paths, the database failure included.
+
+**Caught by that exercise, and fixed: a real defect I introduced.** Inserting
+the helper into `views.py` placed it *between* `launch`'s decorators, so
+`@csrf_exempt` and `@require_http_methods(["POST"])` moved onto the helper and
+off the view. `/lti/launch/` would have rejected Canvas's cross-site POST on
+CSRF — every launch in the product, broken. It is syntactically valid, so ruff
+and the formatter both passed it; only running the code found it. The decorator
+list of every view in the module is now asserted against `git HEAD` and matches.
+
+`migrations/courses/0001_initial.py` was **amended** rather than followed by an
+0002, and now depends on `content.0001_initial`. Safe only because nothing has
+ever been applied (D-009) — this is the third task to rely on that, after 1.13
+and 1.15.
+
+26 test functions added, 27 cases with parametrisation (**202 in the suite**),
+still **unrun**.
+
+**Verified repo-wide while checking this task**, with scripts written for it:
+
+- **All seven models now agree with their hand-written migrations** — Book,
+  ContentNode, Course, CourseMembership, CourseBook, ContentVersion,
+  LtiPlatform. This independently re-confirms the by-hand comparisons recorded
+  for 1.2, 1.6, 2.1 and 2.2, which until now rested on reading.
+- **198 of 198 first-party imported names resolve**, rule C.1 holds (no module
+  imports another module's models), D-048 holds (no module core imports the
+  shared package), and there are **no runtime import cycles** — TYPE_CHECKING
+  imports excluded, since they are not runtime edges.
+
+**Found and fixed while doing this:** `backend/services/__init__.py` still
+claimed "no module imports this package", which D-048 corrected six tasks ago
+and which `apps/lti/views.py` already contradicted. The docstring now states
+the rule D-048 actually settled.
+
+**Owed before 2.5 can be marked DONE:**
+
+1. `makemigrations --check --dry-run` — no changes expected. The courses
+   migration now depends on content's, so the **cross-app dependency graph is
+   exercised for the first time**; a bad dependency shows up here as an
+   unresolvable graph rather than a field mismatch.
+2. `migrate`, `ruff check`, `ruff format --check`, `mypy .`, `pytest`.
+3. Confirm `one_active_book_per_course` is a **partial** unique index in
+   PostgreSQL, and that `link_course_to_book` survives being called twice
+   concurrently for the same course.
+4. Link the demonstration course to the nursing textbook end to end, which
+   needs the course-to-book mapping GAU still owes.
+5. A real deep linking request from Canvas shows the book's title in the
+   content picker — **needs GAU's Canvas**, since the response is signed. The
+   end-to-end test belongs with the mock platform D-052 defers to.
+
+**Points the next loops must respect:**
+
+- **There is no operator-facing way to create a mapping yet.** `link_course_to_book`
+  is the safe path, but nothing exposes it — no command, no CMS screen. **Task
+  3.2** owns the interface. Until then a mapping can only be made from a shell,
+  which is enough for testing and not enough for GAU.
+- **Task 2.6 applies both gates**: `book_for_course` for the book, then
+  `versioning.services.published_node_ids` for the nodes (D-053). Neither
+  implies the other — a published book may contain unpublished chapters, and a
+  draft book may contain published ones.
+- **Task 3.9's draft preview must be its own named path**, not a flag on
+  `book_for_course`. A boolean that widens access is a boolean somebody
+  eventually passes True by accident.
+- **Task 1.14's deep-link picker** can now scope its choices to the course's
+  book rather than offering the whole platform's content.
 
 
 ---

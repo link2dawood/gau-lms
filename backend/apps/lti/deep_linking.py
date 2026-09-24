@@ -34,8 +34,11 @@ __all__ = ["CUSTOM_NODE_PARAM", "content_item", "response_form"]
 # it back on the resulting launch inside the `custom` claim.
 CUSTOM_NODE_PARAM = "node_id"
 
-# What Canvas shows in its content picker for the item we return. Replaced by
-# the book's own title once books exist (task 2.5).
+# What Canvas shows in its content picker when the book is not known — an
+# account-level request, or a course with no published textbook linked. Task
+# 2.5 made the book's own title available; this is the fallback, not the
+# normal case. Deliberately generic: it must make sense before anyone has
+# decided which textbook the course teaches from.
 DEFAULT_ITEM_TITLE = "Interactive Textbook"
 
 
@@ -58,12 +61,19 @@ def content_item(node_id: str = "", title: str = DEFAULT_ITEM_TITLE) -> DeepLink
     return resource
 
 
-def response_form(launch: DjangoMessageLaunch, node_id: str = "") -> str:
+def response_form(
+    launch: DjangoMessageLaunch, node_id: str = "", title: str = DEFAULT_ITEM_TITLE
+) -> str:
     """Build the self-submitting form that returns the item to Canvas.
 
     The response is a JWT signed with the tool's key, which is why a platform
     with no `tool_key_id` cannot answer a deep linking request at all — the
     error surfaces from the signing call, not from here.
+
+    The title is resolved by the caller, because working out which book a
+    course opens needs the courses and content modules and this one must not
+    reach into either (rule C.1). It defaults to the generic title, so a caller
+    that cannot resolve one still gets a usable item.
     """
     logger.info("Answering a deep linking request%s", f" for node {node_id}" if node_id else "")
-    return launch.get_deep_link().output_response_form([content_item(node_id)])
+    return launch.get_deep_link().output_response_form([content_item(node_id, title)])

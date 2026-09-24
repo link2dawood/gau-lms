@@ -3,10 +3,10 @@
 # Written by hand while Docker was paused. `manage.py makemigrations --check`
 # must report no changes before this is applied (task 1.6 verification).
 #
-# Amended by task 1.13 to add the Names and Roles fields. Amending rather
-# than adding 0002 is safe only because no migration has ever been applied
-# to any database (DECISIONS.md D-009); after the first `migrate` this would
-# be a schema rewrite rather than a file edit.
+# Amended by task 1.13 to add the Names and Roles fields, and by task 2.5 to
+# add CourseBook. Amending rather than adding 0002 is safe only because no
+# migration has ever been applied to any database (DECISIONS.md D-009); after
+# the first `migrate` this would be a schema rewrite rather than a file edit.
 
 import uuid
 
@@ -19,6 +19,7 @@ class Migration(migrations.Migration):
     initial = True
 
     dependencies = [
+        ("content", "0001_initial"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
@@ -95,6 +96,39 @@ class Migration(migrations.Migration):
                 "ordering": ("-created_at", "id"),
             },
         ),
+        migrations.CreateModel(
+            name="CourseBook",
+            fields=[
+                (
+                    "id",
+                    models.UUIDField(
+                        default=uuid.uuid4, editable=False, primary_key=True, serialize=False
+                    ),
+                ),
+                ("is_active", models.BooleanField(default=True)),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                ("updated_at", models.DateTimeField(auto_now=True)),
+                (
+                    "course",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.PROTECT,
+                        related_name="book_links",
+                        to="courses.course",
+                    ),
+                ),
+                (
+                    "book",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.PROTECT,
+                        related_name="course_links",
+                        to="content.book",
+                    ),
+                ),
+            ],
+            options={
+                "ordering": ("-created_at", "id"),
+            },
+        ),
         migrations.AddConstraint(
             model_name="course",
             constraint=models.UniqueConstraint(
@@ -106,6 +140,20 @@ class Migration(migrations.Migration):
             model_name="coursemembership",
             constraint=models.UniqueConstraint(
                 fields=("course", "user"), name="unique_course_membership"
+            ),
+        ),
+        migrations.AddConstraint(
+            model_name="coursebook",
+            constraint=models.UniqueConstraint(
+                fields=("course", "book"), name="unique_course_book"
+            ),
+        ),
+        migrations.AddConstraint(
+            model_name="coursebook",
+            constraint=models.UniqueConstraint(
+                condition=models.Q(is_active=True),
+                fields=("course",),
+                name="one_active_book_per_course",
             ),
         ),
     ]

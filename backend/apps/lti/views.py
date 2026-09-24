@@ -33,11 +33,12 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.services import User
-from apps.courses.services import get_course
+from apps.courses.services import find_course, get_course
 from apps.lti import audit, deep_linking, keys, services, tool_conf
 from apps.lti.middleware import launch_scope
 from apps.lti.models import LaunchOutcome
 from apps.lti.permissions import CourseScoped
+from services.course_books import book_for_course
 from services.launch_session import establish_session, redeem_launch_ticket
 from services.provisioning import provision_launch
 
@@ -165,6 +166,39 @@ def login(request: HttpRequest) -> HttpResponse:
         return _unavailable(request)
 
 
+def _deep_link_title(message_launch: DjangoMessageLaunch) -> str:
+    """What Canvas shows in its content picker: the book's own title, if known.
+
+    Closes the placeholder D-050 left for task 2.5. A teacher placing a link
+    should see "Fundamentals of Nursing", not "Interactive Textbook".
+
+    **Never raises.** A deep linking request is answerable without any of this,
+    and the generic title is always a correct answer — just a less helpful one.
+    Three things legitimately go missing here and none of them is a failure:
+    an account-level request carries no course at all, a course nobody has
+    launched yet has no row, and a course may have no book linked or no
+    published one. Following `audit.claims_of` (D-051), the unexpected is
+    logged and swallowed too, so a database hiccup cannot turn a working deep
+    linking request into an error page.
+    """
+    try:
+        claims = services.parse_launch_claims(message_launch.get_launch_data())
+        course = find_course(
+            issuer=claims.issuer,
+            platform_guid=claims.platform_guid,
+            canvas_course_id=claims.canvas_course_id,
+        )
+        if course is not None and (book := book_for_course(course).book) is not None:
+            return book.title
+    except services.LaunchClaimsIncomplete:
+        # An account-level deep linking request carries no course context. That
+        # is legitimate and is exactly why this is answered before provisioning.
+        logger.info("Deep linking request with no course context; using the generic title.")
+    except Exception:
+        logger.exception("Could not resolve a book title for a deep linking request.")
+    return deep_linking.DEFAULT_ITEM_TITLE
+
+
 @csrf_exempt
 @require_http_methods(["POST"])
 @canvas_framable
@@ -256,7 +290,9 @@ def _launch(request: HttpRequest) -> HttpResponse:
         # context — requiring one would refuse a legitimate request at account
         # level. Nothing is created; the reply is a signed content item.
         audit.record_launch(outcome=LaunchOutcome.DEEP_LINK, **audit.claims_of(message_launch))
-        return HttpResponse(deep_linking.response_form(message_launch))
+        return HttpResponse(
+            deep_linking.response_form(message_launch, title=_deep_link_title(message_launch))
+        )
 
     try:
         claims = services.parse_launch_claims(message_launch.get_launch_data())

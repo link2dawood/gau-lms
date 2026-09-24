@@ -1869,3 +1869,99 @@ no other module at all. `services.py` takes `ContentNode` from
 - No new settings, so `.env.example` and `docs/ENVIRONMENT.md` are unchanged and
   `scripts/check_env_docs.py` stays at no drift.
 
+---
+
+## D-057 — A course opens one book, through a row that is never overwritten
+
+**Date:** 2026-09-25 · **Task:** 2.5
+
+`courses.CourseBook` maps a course to the textbook it opens, and
+`services/course_books.py` resolves that mapping into an answer the reader can
+act on.
+
+**Why a row rather than a column on `Course`.** A course and a book have
+different owners and different lifecycles — a course appears when someone
+launches, a book when an editor creates one — and the relationship between them
+is itself the thing an administrator changes, between terms or when a textbook
+is replaced. A column would be overwritten; a row is deactivated, so which book
+a course opened last term survives, and so does the reading position formed
+under it (Section H).
+
+**Two constraints, each for a different failure:**
+
+- `(course, book)` unique, so moving a course back to a textbook it used before
+  reactivates that row instead of accumulating a second one saying the same
+  thing.
+- at most one **active** mapping per course, so "which book does this course
+  open" cannot have two answers. Left to the service, a second active row would
+  make the reader's behaviour depend on row order — the kind of bug that is
+  invisible until it is a student in the wrong textbook.
+
+**Why not allow several books per course.** It is expressible — the join is a
+real join — and Phase 1 does not need it. The house rule is that ambiguity is
+refused rather than resolved by picking: `find_registration_by_issuer` refuses
+when an issuer has several registrations (D-029) rather than choosing one. A
+second textbook per course is a Phase 2 feature that should arrive with a
+deliberate rule for which one opens, not as a silent change in which row is
+first.
+
+**The resolution is a result, not a `Book | None`.** "This course has no
+textbook yet" and "the textbook is not published yet" need different screens and
+have different fixes: one is an administrator linking a book, the other
+publishing one. Flattening both into None moves that decision to a guess at the
+call site — the same reasoning D-014 applied to the API client on the frontend.
+
+**An unpublished book is withheld, not merely flagged.** `CourseBookResolution.book`
+is populated only when the book may be read, so a caller that ignores
+`availability` gets nothing rather than a draft textbook. Task **3.9**'s draft
+preview must therefore be its own named path, not a flag on this one: a boolean
+that widens access is a boolean somebody eventually passes True by accident.
+
+**Deactivate before activating.** `link_course_to_book` retires the current
+mapping and then activates the new one, inside one transaction. A partial unique
+index cannot be `DEFERRABLE` in PostgreSQL — the same limitation D-054 hit with
+sibling positions and D-056 with published versions — so doing it the other way
+round violates the index halfway through. The ordering is the reason the
+function exists rather than being left to each caller to rediscover.
+
+**D-050's constant deep-link title is closed here**, as D-050 asked. Canvas's
+content picker shows the book's own title. That needed `find_course`, a
+read-only lookup on the D-032 identity: a deep linking request is answered
+*before* provisioning, so resolving a title must not create a course as a side
+effect of being asked a question. `_deep_link_title` never raises, following
+`audit.claims_of` (D-051) — an account-level request carries no course, a course
+nobody has launched has no row, and a course may have no published book, and the
+generic title is a correct answer to all three.
+
+**A defect this introduced, caught only by running the code.** Inserting that
+helper into `apps/lti/views.py` placed it between `launch`'s decorators, moving
+`@csrf_exempt` and `@require_http_methods(["POST"])` off the view and onto the
+helper. Every Canvas launch would have been rejected on CSRF, because Canvas's
+POST is cross-site. It is valid Python, so `ruff check` and the formatter both
+passed it, and the AST comparison of models would never have looked. It was
+found by lifting the helper out and executing it, and the fix was verified by
+asserting every view's decorator list against `git HEAD`. Worth recording
+because it is an argument about method: for this module the checks that pass
+cheaply are the ones least likely to find anything.
+
+**Consequences:**
+
+- **Nothing exposes `link_course_to_book` yet.** There is no command and no CMS
+  screen, so a mapping can currently only be made from a shell. Enough for
+  tests, not enough for GAU. **Task 3.2** owns the interface, and the
+  demonstration course still needs the mapping recorded as an open question.
+- **Task 2.6 applies both gates**: this one for the book, and
+  `versioning.services.published_node_ids` for the nodes (D-053). Neither
+  implies the other — a published book may hold unpublished chapters, and a
+  draft book may hold published ones.
+- **Task 1.14's picker can scope to the course's book** rather than offering
+  everything the platform holds.
+- `migrations/courses/0001_initial.py` was **amended** again rather than
+  followed by an 0002, and now depends on `content.0001_initial`. Safe only
+  because nothing has ever been applied (D-009) — this is the third task to
+  lean on that, after 1.13 and 1.15, and the first to add a cross-app migration
+  dependency.
+- `backend/services/__init__.py` still claimed "no module imports this
+  package", which D-048 corrected six tasks ago and which `apps/lti/views.py`
+  already contradicted. Fixed to state the rule D-048 actually settled.
+
