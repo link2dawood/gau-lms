@@ -169,7 +169,7 @@ backend/
     accounts/             User, role normalisation                     task 1.1
     lti/                  launch, OIDC, JWKS, deep linking, NRPS       platforms, keys, JWKS, login, launch, session (1.2–1.9)
     courses/              Course, CourseMembership, CourseBook         course, membership (1.6); course-to-book mapping (2.5)
-    content/              Book, ContentNode, tree service              task 2.1
+    content/              Book, ContentNode, tree service              models, tree service (2.1–2.3); read API (2.6)
     versioning/           ContentVersion, publish, diff, restore       model and published-version reads (2.4)
     reader/               ReadingPosition, next/previous               task 2.9
     search/               Meilisearch client and indexers              task 2.11

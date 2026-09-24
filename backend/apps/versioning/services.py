@@ -41,14 +41,17 @@ def published_version(node: ContentNode) -> ContentVersion | None:
 
 
 def published_versions_for(nodes: Iterable[ContentNode]) -> dict[UUID, ContentVersion]:
-    """The published version of each of these nodes, keyed by node id.
+    """The published version of each of these nodes, **with its body**.
 
-    One query for the whole set. The reader holds an entire book's reading
-    order on every page load (D-055), so the alternative — asking per node —
-    would be a query per chapter of the book.
+    One query for the whole set, and it loads every body in it — so this is for
+    callers that actually want the text of many nodes at once. Task 2.12's
+    indexing is that caller: it walks a whole book block by block.
 
-    Nodes with no published version are simply absent from the mapping, which
-    is what makes it usable as a filter as well as a lookup.
+    A reader serving one page wants `published_node_ids` and then one body;
+    task 2.4 named 2.6 as this function's consumer and that was wrong, which
+    building 2.6 is what showed.
+
+    Nodes with no published version are simply absent from the mapping.
     """
     node_ids = [node.pk for node in nodes]
     if not node_ids:
@@ -58,14 +61,27 @@ def published_versions_for(nodes: Iterable[ContentNode]) -> dict[UUID, ContentVe
 
 
 def published_node_ids(nodes: Iterable[ContentNode]) -> set[UUID]:
-    """Which of these nodes have something published.
+    """Which of these nodes have something published — ids only, no bodies.
 
     This is what task 2.6 filters a reading order with before handing it to
     `content.services.neighbours`. Filtering once, in one place, is what stops
     the Next button walking a student into a draft (D-055): a node missing
     from the order has no neighbours rather than the wrong ones.
+
+    **Deliberately not `set(published_versions_for(nodes))`**, which is what it
+    was until 2.6 was written. That loaded the full Tiptap body of every
+    chapter in the book in order to return a set of ids — on every page load,
+    for a table of contents that shows none of it. `values_list` reads one
+    column instead.
     """
-    return set(published_versions_for(nodes))
+    node_ids = [node.pk for node in nodes]
+    if not node_ids:
+        return set()
+    return set(
+        ContentVersion.objects.filter(node_id__in=node_ids, is_published=True).values_list(
+            "node_id", flat=True
+        )
+    )
 
 
 def history(node: ContentNode) -> list[ContentVersion]:

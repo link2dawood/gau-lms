@@ -22,7 +22,9 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     # JWKS and OIDC login; the launch endpoint joins them in task 1.5.
     path("lti/", include("apps.lti.urls")),
-    # Still to be mounted, each by the task that builds it: the content API at
-    # /api/ (2.6), reading positions (2.10), search (2.13), and the CMS API at
-    # /api/cms/ (3.2).
+    # The read API: which book a course opens, its contents, and a node's
+    # published body. Course-scoped; see apps/content/views.py.
+    path("api/", include("apps.content.urls")),
+    # Still to be mounted, each by the task that builds it: reading positions
+    # (2.10), search (2.13), and the CMS API at /api/cms/ (3.2).
 ]

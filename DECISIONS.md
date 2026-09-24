@@ -1965,3 +1965,82 @@ cheaply are the ones least likely to find anything.
   package", which D-048 corrected six tasks ago and which `apps/lti/views.py`
   already contradicted. Fixed to state the rule D-048 actually settled.
 
+---
+
+## D-058 — Cross-course refusal is a comparison, not an object permission
+
+**Date:** 2026-09-25 · **Task:** 2.6 · *Amends D-043 and D-044*
+
+The read API refuses another course's content by resolving the launch's course
+to its book and comparing, not by calling `check_object_permissions`.
+
+**Why the object permission cannot do it.** D-043 said task 2.6 would "resolve
+book to course and scope there", and D-044 recorded that
+`CourseScoped.has_object_permission` was waiting for 2.6 to become its first
+caller. Building 2.6 showed that it cannot be:
+
+- A `Book` and a `ContentNode` have no `course_id`, so `_course_id_of` denies
+  them every time. That is the correct way to fail, and it is not a check.
+- Resolving content **to** a course is one-to-many. A book legitimately serves
+  several courses — every section of the same nursing module — so "which course
+  owns this book" has no single answer and cannot decide anything.
+
+The relationship is only single-valued in the other direction: a course opens
+exactly one book (D-057). So the check runs that way. The session names the
+course, the course names the book, and a book id in a URL is only ever compared
+against it. There is no parameter on any of these endpoints that can widen what
+a reader reaches — which is the property D-043 was actually asking for, reached
+by a different route than it predicted.
+
+**Consequence: `CourseScoped.has_object_permission` still has no caller.** It is
+sound and it fails closed, but nothing invokes it, and Section H forbids code
+with no caller. **Task 4.3 must either find it one or delete it.** Recorded
+rather than removed here, because it is the second half of a permission class
+another task authored and removing it is not a call to make while auditing
+something else.
+
+**Three endpoints, not the two the backlog lists.** `GET /api/textbook/` was
+added because nothing told the reader *which* book to ask for — the two
+specified endpoints both take an id the frontend had no way to learn, so task
+2.8 would have been blocked on it. It also carries D-057's three-way
+availability, which no other route exposes; without it, keeping "no textbook
+linked" and "textbook not published" apart bought nothing, since the UI could
+never see the difference.
+
+**Both gates, one place each.** The book gate is `book_for_course`. The node
+gate filters the reading order once, in `_published_order`, before the contents,
+the breadcrumb and previous/next are derived from it. That is D-055's design
+paying off: `next` steps over an unpublished section instead of landing on it,
+and a breadcrumb under an unpublished chapter is shorter rather than naming a
+chapter the student cannot open — neither needed a rule of its own.
+
+**A defect in D-056's services, found by writing their consumer.**
+`published_node_ids` was implemented as `set(published_versions_for(nodes))`,
+which loaded the full Tiptap body of every chapter in the book to return a set
+of ids — on every page load, for a table of contents that renders none of it.
+It now reads one column. Nothing would have found this from the outside: the
+responses were byte-identical and only the cost differed. D-056 also named 2.6
+as `published_versions_for`'s consumer; that was wrong. 2.6 wants ids and a
+single body, and the real consumer of many bodies at once is task 2.12's
+indexing.
+
+**Query-count tests assert an invariant, not a constant.** A book with forty
+chapters must cost exactly what a book with two costs. A literal number would
+have been a guess, since nothing here has been executed, and it would break on
+any incidental change while saying nothing about what matters. The invariant is
+what protects the design — and it is what would have caught the defect above.
+
+**Consequences:**
+
+- **Tasks 2.7 and 2.8 consume these shapes**, and their guards must validate
+  recursively (D-015): the contents nest arbitrarily deep and the body is a
+  whole Tiptap document.
+- **Task 2.8 calls `/api/textbook/` first**, and renders the two unavailable
+  states as messages rather than errors. They are ordinary states.
+- **Task 2.10 must not re-derive the published order.** `_published_order` is
+  the single filter point; a second one drifts, and the symptom is a student
+  reaching a draft.
+- **Task 3.9's preview needs its own endpoint.** Every route here serves
+  published content by construction, and a flag that widens that is a flag
+  somebody eventually sets.
+

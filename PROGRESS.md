@@ -8,7 +8,7 @@ A task is `BLOCKED` with the specific question recorded inline, so the next loop
 does not repeat the work.
 
 **Current status:** Stage 1 built; Stage 2 started. **0.8**, **1.1**–**1.17**,
-**2.1**–**2.5** are implemented. Everything awaits a Docker test run — including the
+**2.1**–**2.6** are implemented. Everything awaits a Docker test run — including the
 suite itself, which is written but has never been executed.
 
 ---
@@ -1106,7 +1106,7 @@ brings role constants, 4.4 brings rate limiting. An empty directory is a stub.
 | 2.3 | Tree service: full TOC in one query, resolve ancestors, flat reading order, next and previous across sibling and parent boundaries | 2.2 | **IN PROGRESS** |
 | 2.4 | `versioning.ContentVersion` model: uuid, node fk, version_number, body (JSONB Tiptap), created_by, created_at, change_note, is_published, previous_version fk | 2.2 | **IN PROGRESS** |
 | 2.5 | `courses.CourseBook` mapping model plus service resolving which book a launched course opens | 2.1, 1.6 | **IN PROGRESS** |
-| 2.6 | Read API: `GET /api/books/:id/toc`, `GET /api/nodes/:id` returning published body plus prev/next, course-scoped and permission-checked | 2.3, 2.5, 1.11 | TODO |
+| 2.6 | Read API: `GET /api/books/:id/toc`, `GET /api/nodes/:id` returning published body plus prev/next, course-scoped and permission-checked | 2.3, 2.5, 1.11 | **IN PROGRESS** |
 | 2.7 | Tiptap JSON renderer in React: headings, paragraphs, lists, tables with headers, figures with captions and alt text, blockquotes, callouts, references, links; every top-level node renders with `id={blockId}` | 0.4 | TODO |
 | 2.8 | Reader layout: collapsible TOC sidebar, breadcrumb, content pane, previous/next controls, mobile drawer TOC, sticky progress indicator | 2.6, 2.7 | TODO |
 | 2.9 | `reader.ReadingPosition` model: user, book, node, block_id, scroll_ratio, updated_at, unique per user and book | 2.2 | TODO |
@@ -1403,6 +1403,96 @@ the rule D-048 actually settled.
 - **Task 1.14's deep-link picker** can now scope its choices to the course's
   book rather than offering the whole platform's content.
 
+**2.6 notes: implemented and host-checked.** `apps/content/views.py`
+serves the read API, mounted at `/api/` by `core/urls.py`. Three endpoints, all
+course-scoped:
+
+| Route | Answers |
+|---|---|
+| `GET /api/textbook/` | which book this launch opens, and if none, why not |
+| `GET /api/books/<id>/toc/` | that book's contents, published parts only |
+| `GET /api/nodes/<id>/` | one node's published body, breadcrumb, prev/next |
+
+**Acceptance criterion 12 is demonstrable for the first time.** D-044 recorded
+that `has_object_permission` had no caller, so nothing in the platform could
+emit a cross-course refusal — criterion 12 "rests on 2.6, 1.16 and 4.3, and on
+nothing before them". A reader launched into one course who asks for another
+course's book, or a node from it, is now refused by name, and
+`TestCrossCourseRefusal` asserts it seven ways.
+
+**It is not `has_object_permission` that does it** (D-058), and that matters for
+task 4.3. Content has no `course_id` for the permission to read, and a book
+legitimately serves many courses, so resolving content → course is one-to-many
+and cannot decide anything. The refusal runs the other way: the session names
+the course, the course names one book (D-057), and a book id in the URL is only
+ever *compared* against it. **`CourseScoped.has_object_permission` therefore
+still has no caller** — 4.3 should either find it one or remove it as dead code.
+
+**A third endpoint was added beyond the two in the backlog.** Nothing told the
+reader which book to ask for, so `GET /api/books/:id/toc` was unreachable from
+the frontend and task 2.8 would have been blocked. `/api/textbook/` also carries
+D-057's three-way availability, which was otherwise unreachable from the UI and
+so pointless.
+
+**Both of D-053's gates, one place each.** The book gate is `book_for_course`;
+the node gate filters the reading order once, before contents, breadcrumb and
+prev/next are derived from it (D-055). Asserted directly: `next` steps over an
+unpublished section rather than landing on it, and a breadcrumb under an
+unpublished chapter shows a shorter trail rather than naming a chapter the
+student cannot open.
+
+**Executed on this host** — **10 of 10 cases**, the shaping logic lifted from
+the shipped source by AST: breadcrumbs with a missing ancestor, a sibling that
+must not be mistaken for one, an unrelated branch, a top-level node, and the
+three response shapes.
+
+26 test functions added, 30 cases with parametrisation (**228 in the suite**),
+still **unrun**.
+
+**A performance defect in 2.4, found by writing its consumer and fixed.**
+`published_node_ids` was `set(published_versions_for(nodes))`, which loaded the
+full Tiptap body of **every chapter in the book** in order to return a set of
+ids — on every page load, for a table of contents that displays none of it. It
+now reads one column with `values_list`. Nothing would have caught this: the
+responses were identical and only the cost differed. 2.4 also named 2.6 as
+`published_versions_for`'s consumer, which was wrong — 2.6 wants ids and one
+body; the real consumer is task 2.12's indexing.
+
+**The query-count tests assert an invariant, not a number.** A book with forty
+chapters must cost exactly what a book with two costs. A magic constant would
+have been a guess — nothing here has been run — and it would break on any
+incidental change; the invariant is the thing actually worth protecting, and it
+is what would have caught the defect above.
+
+**Owed before 2.6 can be marked DONE:**
+
+1. `migrate`, `ruff check`, `ruff format --check`, `mypy .`, `pytest`. The API
+   tests are the first in this project to exercise the URLconf, DRF permissions
+   and the session end to end, so they are the likeliest to need fixing on
+   first run.
+2. Confirm the two query-count invariants hold, and record the actual constants
+   in this file once they are known.
+3. Confirm DRF renders `PermissionDenied` as 403 and `NotFound` as 404 with
+   `{"detail": …}`, which the frontend guards in 2.7/2.8 will be written
+   against.
+4. Walk a real launch through to a chapter, in Canvas — the first time the
+   whole chain is exercised.
+
+**Points the next loops must respect:**
+
+- **Task 2.7's Tiptap renderer and 2.8's reader consume these shapes.** Their
+  guards must validate recursively (D-015): `toc` nests arbitrarily deep, and
+  `body` is a whole Tiptap document.
+- **Task 2.8 must call `/api/textbook/` first** to learn the book id, and must
+  render the two unavailable states as messages rather than as errors.
+- **Task 2.10's reading position must not re-derive the published order.**
+  `_published_order` is the single filter point; a second one will drift.
+- **Task 3.9's preview needs its own endpoint**, not a flag on these. Every
+  route here serves published content only, by construction.
+- **Task 4.3** should note that these endpoints refuse by comparison rather
+  than by object permission, and decide the fate of
+  `CourseScoped.has_object_permission`.
+
 
 ---
 
@@ -1465,7 +1555,7 @@ Phase 1 is done.
 | 9 | Import workflow available, imported content editable before publishing | 3.16, 4.7 |
 | 10 | Content updates create traceable versions, no destructive replacement | 3.16, 4.7 |
 | 11 | Core screens work on desktop, tablet and mobile | 2.14, 4.6 |
-| 12 | Student, Faculty and Administrator access correctly restricted, cross-course denial included | 4.3, 4.7 |
+| 12 | Student, Faculty and Administrator access correctly restricted, cross-course denial included | 2.6, 4.3, 4.7 |
 | 13 | Phase 1 environment deployed and available for testing | 4.8, 4.9 |
 
 ---

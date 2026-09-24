@@ -25,6 +25,7 @@ __all__ = [
     "TocEntry",
     "ancestors_of",
     "neighbours",
+    "nest",
     "reading_order",
     "table_of_contents",
 ]
