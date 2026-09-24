@@ -170,7 +170,7 @@ backend/
     lti/                  launch, OIDC, JWKS, deep linking, NRPS       platforms, keys, JWKS, login, launch, session (1.2–1.9)
     courses/              Course, CourseMembership, CourseBook         task 1.6
     content/              Book, ContentNode, tree service              task 2.1
-    versioning/           ContentVersion, publish, diff, restore       task 2.4
+    versioning/           ContentVersion, publish, diff, restore       model and published-version reads (2.4)
     reader/               ReadingPosition, next/previous               task 2.9
     search/               Meilisearch client and indexers              task 2.11
     cms/                  admin API for hierarchy and editing          task 3.1

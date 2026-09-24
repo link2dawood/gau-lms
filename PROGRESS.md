@@ -8,7 +8,7 @@ A task is `BLOCKED` with the specific question recorded inline, so the next loop
 does not repeat the work.
 
 **Current status:** Stage 1 built; Stage 2 started. **0.8**, **1.1**–**1.17**,
-**2.1**–**2.3** are implemented. Everything awaits a Docker test run — including the
+**2.1**–**2.4** are implemented. Everything awaits a Docker test run — including the
 suite itself, which is written but has never been executed.
 
 ---
@@ -254,7 +254,7 @@ Points the next loops must respect:
 | 1.16 | Tests: valid launch, expired token, wrong aud, replayed nonce, unknown role, cross-course 403, first-launch provisioning, repeat-launch idempotency | 1.11 | **IN PROGRESS** |
 | 1.17 | `docs/CANVAS_SETUP.md` plus the tool JSON configuration for the Canvas admin | 1.5 | **IN PROGRESS** |
 
-**1.1 notes: implemented but not verified; not committed.** `apps/accounts` provides
+**1.1 notes: implemented but not verified.** `apps/accounts` provides
 the User model (UUID pk, unique `canvas_user_id`, unusable reader passwords), a
 manager, and a Django admin that cannot add users and shows Canvas-supplied
 fields read-only (D-023). `AUTH_USER_MODEL` and `apps.accounts` are now set in
@@ -276,7 +276,7 @@ statically compared with the model: 15 of 15 fields match.
    including `test_models_and_migrations_are_in_sync`.
 6. Commit only once these pass. Do not stage `docs/` or `screenshots/`.
 
-**1.2 notes: implemented and host-verified; not committed.** `apps/lti` holds the
+**1.2 notes: implemented and host-verified.** `apps/lti` holds the
 `LtiPlatform` model, its `services.py` interface and one management command.
 Registrations come from a JSON file named by `LTI_PLATFORMS_FILE` (D-025), so no
 Canvas host, client id or deployment id appears in code — verified by search.
@@ -387,7 +387,7 @@ textbook works at every level, including `anonymous`.
    as a teacher. That is acceptance criteria 1, 2 and 3 demonstrated manually,
    and until 1.16 exists it is the only demonstration there is.
 
-**1.15 notes: implemented and host-checked; not committed.**
+**1.15 notes: implemented and host-checked.**
 `lti.LtiLaunchLog` records every launch; `apps/lti/audit.py` writes it; the
 launch view records all six outcomes — accepted, deep link, and four distinct
 refusals.
@@ -422,7 +422,7 @@ outcome choices and both indexes.
 - **Task 4.3**'s access-control audit can use this table as evidence rather
   than reasoning from the code alone.
 
-**1.14 notes: implemented and host-checked; not committed.**
+**1.14 notes: implemented and host-checked.**
 `apps/lti/deep_linking.py` answers a Deep Linking request with a signed content
 item; the launch view branches to it before provisioning; the node id it
 carries comes back on the resulting launch and is passed through to
@@ -463,7 +463,7 @@ The `apps/lti` import graph was checked for cycles after adding the module:
 - **Task 2.5** should replace the constant item title with the book's own.
 - The picker belongs with **2.2/2.3**; the plumbing it needs is already here.
 
-**1.13 notes: implemented and host-checked; not committed.** `services/roster.py`
+**1.13 notes: implemented and host-checked.** `services/roster.py`
 reconciles a course against the Canvas roster; `apps/lti/tasks.py` runs it on
 demand and every six hours on the `canvas` queue. `Course` gained the Names and
 Roles URL and a `roster_synced_at`, and `migrations/courses/0001_initial.py` was
@@ -508,7 +508,7 @@ locks on every row in the course.
   `core.celery`. **Task 2.12 and 3.11** add task modules and inherit it;
   business logic stays strict.
 
-**1.12 notes: implemented and host-checked; not committed.** `/launch` is the
+**1.12 notes: implemented and host-checked.** `/launch` is the
 frontend landing a verified launch now redirects to. It resolves the session,
 redeems a launch ticket if the cookie did not survive, removes the ticket from
 the address bar, and shows the role-appropriate way on.
@@ -568,7 +568,7 @@ One of its open questions is answered: `name` and `email` on the user model are
 - **Tasks 4.1 and 4.2** must reuse `lib/launch/routing.ts` rather than restate
   the rule.
 
-**1.11 notes: implemented and host-checked; not committed.**
+**1.11 notes: implemented and host-checked.**
 `apps/lti/middleware.py` puts the launch's course and role on every request;
 `apps/lti/permissions.py` enforces them; `GET /lti/context/` is the first
 consumer and is what task 1.12 will route on.
@@ -627,7 +627,7 @@ check of one helper.
 - **Task 1.12** consumes `GET /lti/context/` and decides the fate of the launch
   ticket (D-042).
 
-**1.10 notes: implemented and host-checked; not committed.** `/lti/login/` now
+**1.10 notes: implemented and host-checked.** `/lti/login/` now
 calls `enable_check_cookies()` with our own wording (D-041), so a launch first
 renders a page that writes a cookie and reads it back, and offers a new tab when
 that fails.
@@ -686,7 +686,7 @@ library's design rather than something 1.10 fixes.
 - **Task 1.16** must cover a blocked-cookie launch, not only the happy path.
   It is the case most likely to reach a real student.
 
-**1.9 notes: implemented, reviewed, host-checked only; not committed.** A verified launch
+**1.9 notes: implemented, reviewed, host-checked only.** A verified launch
 now signs the user in and redirects to the frontend with a launch ticket.
 
 `services/launch_session.py` owns both ways in: the session cookie, and the
@@ -753,7 +753,7 @@ not.
 - Local development must use `http://localhost`, `http://127.0.0.1` or HTTPS.
   A LAN address silently drops the session cookie.
 
-**1.8 notes: implemented and host-verified; not committed.**
+**1.8 notes: implemented and host-verified.**
 `services/provisioning.py` upserts the user, course and membership in one
 transaction and returns a `LaunchContext`. `/lti/launch/` now calls it, so a
 verified launch produces real rows and the page names the course and role from
@@ -827,7 +827,7 @@ reviewer could not repeat that audit with the library uninstalled. If
 `check_value` ever gains a second call site, state validation would start
 consuming state.
 
-**1.6 notes: implemented, host-verified and reviewed; not committed.**
+**1.6 notes: implemented, host-verified and reviewed.**
 `courses.Course` and `courses.CourseMembership`, both UUID-keyed, plus the
 `Role` enum that task 1.7 maps onto. Model and migration were compared field by
 field: 16 fields across both models, both Meta blocks and both constraints agree.
@@ -851,7 +851,7 @@ Nothing is deleted here. A member who leaves the Canvas roster is deactivated
 keys are `PROTECT` so that a stray delete fails loudly rather than quietly
 taking someone's reading history.
 
-**1.7 notes: implemented and host-verified; not committed.**
+**1.7 notes: implemented and host-verified.**
 `apps/courses/services.py` — the module's public interface — maps the LTI roles
 claim onto `STUDENT`, `FACULTY`, `ADMIN`. The mapping table is the IMS LIS and
 LTI vocabularies, listed in both full-URI and bare-term spellings.
@@ -894,7 +894,7 @@ across two platform guids, and that deactivation never deletes.
 - **Task 1.12** routes on the membership role; actual CMS access still requires
   `is_content_admin`, which no Canvas role confers (D-023).
 
-**1.5 notes: implemented and host-verified; not committed.** `/lti/launch/`
+**1.5 notes: implemented and host-verified.** `/lti/launch/`
 validates through PyLTI1p3 and renders `lti/message.html` on every outcome.
 Where each required check happens:
 
@@ -966,7 +966,7 @@ missing state, and that each renders the error page rather than a traceback.
 - **Task 1.10:** the state cookie is still the primary path;
   `enable_check_cookies()` remains unused.
 
-**1.4 notes: implemented, host-verified and reviewed; not committed.**
+**1.4 notes: implemented, host-verified and reviewed.**
 `/lti/login/` generates `state` and `nonce`, stores both in the `lti_state`
 cache — its own Redis logical database, per D-008 — with a **600 second**
 lifetime, and redirects to the registered platform's authorisation URL.
@@ -1017,7 +1017,7 @@ LTI cache and expire, a missing key file does not break a launch.
 - **Task 1.16** is now carrying the entire test debt for `apps.lti`. Nothing in
   this module is covered by CI, so review is currently its only gate.
 
-**1.3 notes: implemented and host-verified; not committed.** `apps/lti/keys.py`
+**1.3 notes: implemented and host-verified.** `apps/lti/keys.py`
 generates RSA 2048 keypairs and builds the JWKS; `create_lti_key` is the command;
 `/lti/jwks/` is mounted and serves the public halves (D-026).
 
@@ -1104,7 +1104,7 @@ brings role constants, 4.4 brings rate limiting. An empty directory is a stub.
 | 2.1 | `content.Book` model: uuid, title, slug, description, status, created/updated | 0.3 | **IN PROGRESS** |
 | 2.2 | `content.ContentNode` model: uuid, book fk, parent fk, node_type (UNIT, CHAPTER, SECTION, SUBSECTION), title, position, materialised ancestry for efficient tree reads | 2.1 | **IN PROGRESS** |
 | 2.3 | Tree service: full TOC in one query, resolve ancestors, flat reading order, next and previous across sibling and parent boundaries | 2.2 | **IN PROGRESS** |
-| 2.4 | `versioning.ContentVersion` model: uuid, node fk, version_number, body (JSONB Tiptap), created_by, created_at, change_note, is_published, previous_version fk | 2.2 | TODO |
+| 2.4 | `versioning.ContentVersion` model: uuid, node fk, version_number, body (JSONB Tiptap), created_by, created_at, change_note, is_published, previous_version fk | 2.2 | **IN PROGRESS** |
 | 2.5 | `courses.CourseBook` mapping model plus service resolving which book a launched course opens | 2.1, 1.6 | TODO |
 | 2.6 | Read API: `GET /api/books/:id/toc`, `GET /api/nodes/:id` returning published body plus prev/next, course-scoped and permission-checked | 2.3, 2.5, 1.11 | TODO |
 | 2.7 | Tiptap JSON renderer in React: headings, paragraphs, lists, tables with headers, figures with captions and alt text, blockquotes, callouts, references, links; every top-level node renders with `id={blockId}` | 0.4 | TODO |
@@ -1117,7 +1117,7 @@ brings role constants, 4.4 brings rate limiting. An empty directory is a stub.
 | 2.14 | Responsive pass: desktop, laptop, tablet, mobile; keyboard navigation for TOC and prev/next, focus management, sensible contrast | 2.8 | TODO |
 | 2.15 | Tests: TOC integrity, prev/next at first and last node, published-only visibility, search returns correct block, position round-trip, cross-course node access denied | 2.13, 2.10 | TODO |
 
-**2.1 notes: implemented and host-checked; not committed.** `content.Book` is
+**2.1 notes: implemented and host-checked.** `content.Book` is
 the root of the content tree, with `apps/content` wired into `LOCAL_APPS` and
 `MIGRATION_MODULES`. Model and migration compared field by field: 7 of 7 match,
 plus the ordering and the check constraint.
@@ -1136,7 +1136,7 @@ because renaming it would otherwise move every reading position in the book.
 
 10 tests added (118 in the suite now), still **unrun**.
 
-**2.2 notes: implemented and host-checked; not committed.** `ContentNode` stores
+**2.2 notes: implemented and host-checked.** `ContentNode` stores
 the tree twice — a `parent` relation, which is the truth, and a materialised
 `path` of zero-padded positions, which is that truth made sortable (D-054).
 Model and migration compared: 9 of 9 fields, both check constraints, the index
@@ -1161,7 +1161,7 @@ the design.
 
 11 tests added (129 in the suite), still unrun.
 
-**2.3 notes: implemented and host-checked; not committed.**
+**2.3 notes: implemented and host-checked.**
 `apps/content/services.py` is the content module's public face:
 `reading_order` (one query), `table_of_contents` (nested from it),
 `ancestors_of` (one IN query on path prefixes) and `neighbours`.
@@ -1215,6 +1215,88 @@ query-count assertions in particular are the kind that only a real run settles.
   stops being published, or archived content stays findable.
 - `slug` is unique across all books including archived ones, so re-using an
   archived book's slug fails. Better than two books answering one URL.
+
+**2.4 notes: implemented and host-checked.** `apps/versioning`
+holds `ContentVersion` — the inner of D-053's two gates — plus the module's
+`services.py`. Model and migration compared mechanically rather than by eye:
+**9 of 9 fields, 4 of 4 constraints and the ordering agree**.
+
+**Four invariants are the database's, not the application's:**
+
+| Constraint | What it prevents |
+|---|---|
+| one published version per node | "the published body" having two answers |
+| `(node, version_number)` unique | two simultaneous publishes both becoming v3 |
+| `version_number >= 1` | a numbering that starts nowhere |
+| `previous_version` unique | history becoming a tree, so "what came before" is ambiguous |
+
+**A published version is immutable, and the guard is cheap** (D-056). A row
+loaded as published refuses to be saved again; the one exception is withdrawal,
+which changes the flag and never the text. This deliberately does **not** work by
+remembering the loaded body — that would deep-copy a whole chapter on every
+reader page load, and a caller mutating `body` in place would slip past it
+anyway. A boolean has neither weakness.
+
+**Executed on this host**, lifted from the shipped source by AST because Django
+is not installed here — **17 of 17 cases**. `validate_tiptap_document` accepts a
+document, an empty document and an unknown node type inside it, and refuses a
+string, a bare list, `None`, `{}`, a non-`doc` type, a missing `content` key and
+a `content` that is not a list. The `save` guard allows a new row, a draft edit,
+a publish and a withdrawal, and refuses only the re-save of an already-published
+version.
+
+`services.py` offers exactly four reads, each with a named consumer:
+`published_version` and `published_versions_for` for task 2.6, `published_node_ids`
+for the reading-order filter D-055 requires, and `history` for task 3.7. Nothing
+speculative — allocating numbers, saving drafts and publishing are 3.6's.
+
+31 test functions added, 36 cases with parametrisation (**176 in the suite**),
+still **unrun**. Rule C.1 holds: `apps/versioning` imports no other module's
+models, the foreign key names `content.ContentNode` lazily as a string, and
+`services.py` takes `ContentNode` from `apps.content.services` (the D-044
+precedent). No import cycle — `content` does not reach back.
+
+**Owed before 2.4 can be marked DONE:**
+
+1. `makemigrations --check --dry-run` — no changes expected. If there are,
+   regenerate `migrations/versioning/0001_initial.py` rather than patching it.
+   This is the first migration whose `initial = True` depends on another app's
+   initial migration, so the dependency graph is exercised for the first time.
+2. `migrate`, `ruff check`, `ruff format --check`, `mypy .`, `pytest`.
+3. Confirm in PostgreSQL that `one_published_version_per_node` is a **partial**
+   unique index, and that it is the index the planner uses for
+   `published_versions_for` — the one-query claim rests on it.
+4. Confirm `previous_version` uniqueness tolerates many NULLs, which is
+   PostgreSQL's default and what every node's first version relies on.
+
+**Points the next loops must respect:**
+
+- **Task 3.6 must unpublish before it publishes, inside one transaction.** The
+  partial unique index cannot be deferred (the same PostgreSQL limitation D-054
+  hit with sibling positions), so publishing the next version while the current
+  one is still published violates it halfway through.
+- **Task 3.6 must call `full_clean()` before writing a body.** Django validators
+  do not run on `save()` — exactly the trap D-025 hit with platform
+  registrations. A test asserts this rather than assuming it.
+- **Task 3.6 owns allocating `version_number`.** The model deliberately does not
+  pick one: a model that quietly chose the next number would turn a race into
+  two rows that both believe they are v3 instead of a loud failure.
+- **Unsettled, and 3.6's to settle: how the working draft is identified.**
+  `is_published = False` covers both "not yet published" and "superseded", so
+  the natural reading is "the newest version of the node, when it is not the
+  published one". That is not encoded anywhere and should not be guessed at
+  twice.
+- **Task 2.6 filters the reading order with `published_node_ids`** and passes the
+  result to `content.services.neighbours`. That is the single point where
+  published-only navigation is enforced (D-055).
+- **Task 2.12 indexes from the published version and removes on withdrawal.**
+  A version that stops being published must leave the search index, or a draft
+  is reachable through search even though the reader will not navigate to it.
+- **Task 3.7's "restore" is a forward step**, never a rewind: it creates a new
+  draft whose `previous_version` is the current head. Which version it was
+  restored *from* has no column and belongs in `change_note` until 3.7 decides
+  it needs one.
+
 
 ---
 

@@ -1784,3 +1784,88 @@ irregular tree still renders every node.
 - `ancestors_of` still queries, for callers that hold a node but not the order
   — deep link resolution, for instance. It costs no query at all for a
   top-level node.
+
+---
+
+## D-056 — A version is a link in a chain, and a published one is frozen
+
+**Date:** 2026-09-25 · **Task:** 2.4
+
+`versioning.ContentVersion` is a new module holding the history of what each
+node has said. Four rules are enforced by the database rather than by the code
+that happens to be writing at the time:
+
+| Constraint | The failure it prevents |
+|---|---|
+| at most one published version per node | "the published body" being a question with two answers and no way to choose |
+| `(node, version_number)` unique | two simultaneous publishes both becoming version 3 |
+| `version_number >= 1` | a numbering that starts nowhere in particular |
+| `previous_version` unique | the history becoming a tree, so "what came before this" is ambiguous |
+
+**Why the history is a chain and not a tree.** Task 3.7 restores an old version,
+and the obvious implementation points the new version back at the one being
+restored — which forks the history, because the current head already points
+there too. Acceptance criterion 10 asks for *traceable* versions; a fork means
+there is no single answer to what preceded a version. So a restore is a forward
+step: the new draft succeeds the current head, and the fact that it was restored
+from version 2 is a note, not a link. The constraint makes the wrong
+implementation fail immediately rather than quietly produce an unreadable
+history months later.
+
+PostgreSQL treats NULLs as distinct, so every node's first version passes freely
+without a partial constraint.
+
+**A published version is immutable, and the guard is a boolean.** A row loaded
+as published refuses to be saved again. The single exception is withdrawal —
+`is_published` going false — which changes the flag and never the text.
+Everything else that might want to write to a published row (fixing a typo,
+amending a change note, re-running an import) is exactly the destructive
+replacement rule C.3 forbids; the answer is always the next version.
+
+The obvious implementation — remember the body as loaded and compare on save —
+was written and rejected. It costs a deep copy of a whole chapter every time the
+reader loads a page, which is the hot path this platform exists to serve, and it
+does not even work: a caller mutating `body` in place would compare the
+remembered object against itself and pass. Remembering one boolean costs nothing
+and has neither weakness.
+
+**It is the guard, not the guarantee.** `QuerySet.update()` and raw SQL go
+around it, and the real rule belongs to the publish service in task 3.6. What it
+catches is the realistic mistake: a code path that edits the row a student is
+reading instead of adding the one after it.
+
+**Rule C.1 is kept without importing anything.** The foreign key names
+`"content.ContentNode"` lazily as a string, so this module's models reach into
+no other module at all. `services.py` takes `ContentNode` from
+`apps.content.services`, which is the boundary D-044 already established for
+`Course`. `content` does not import `versioning`, so there is no cycle.
+
+**Consequences:**
+
+- **Task 3.6 must unpublish before it publishes, in one transaction.** A partial
+  unique index cannot be `DEFERRABLE` in PostgreSQL — the same limitation D-054
+  hit with sibling positions — so publishing the next version while the current
+  one is still published violates the index halfway through. Unpublish, then
+  publish.
+- **Task 3.6 must call `full_clean()`.** `validate_tiptap_document` is a Django
+  validator, so it runs on `full_clean()` and never on `save()`. D-025 hit this
+  exact trap with platform registrations, where a malformed record was stored
+  happily and only failed later, at launch. Here it would fail in the reader, in
+  front of a student. A test asserts the trap rather than assuming the reader of
+  this file will remember it.
+- **`version_number` is allocated by task 3.6, not by the model.** A model that
+  quietly picked the next number would convert a race into two rows that both
+  believe they are version 3. The unique constraint makes it a loud failure
+  instead, which is the only outcome a caller can do anything about.
+- **How the working draft is identified is deliberately not settled here.**
+  `is_published = False` means both "never published" and "superseded", so the
+  natural reading is "the newest version of the node, when that is not the
+  published one". The backlog specifies a boolean, so a `status` enum would be a
+  schema change rather than a decision, and 3.6 is where it can be chosen with
+  the save-and-publish flow actually in view.
+- **Task 2.12 must remove a version's documents from the search index when it
+  stops being published.** Withdrawal is a flag, not a delete, so nothing else
+  will tell the index.
+- No new settings, so `.env.example` and `docs/ENVIRONMENT.md` are unchanged and
+  `scripts/check_env_docs.py` stays at no drift.
+

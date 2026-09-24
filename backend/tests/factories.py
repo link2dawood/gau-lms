@@ -23,6 +23,7 @@ from apps.lti.services import (
     CLAIM_ROLES,
     CLAIM_TOOL_PLATFORM,
 )
+from apps.versioning.models import ContentVersion
 
 User = get_user_model()
 
@@ -125,3 +126,46 @@ def launch_body(**overrides: Any) -> dict[str, Any]:
     }
     body.update(overrides)
     return body
+
+
+def tiptap_document(*paragraphs: str) -> dict[str, Any]:
+    """A Tiptap document, shaped the way the editor (task 3.5) emits one.
+
+    Shared so that a test asserting on versioning and a test asserting on the
+    renderer cannot drift apart about what a body actually looks like. Each
+    top-level node carries a `blockId`, because that is what the reader anchors
+    to (task 2.7) and what the search index points at (task 2.11).
+    """
+    return {
+        "type": "doc",
+        "content": [
+            {
+                "type": "paragraph",
+                "attrs": {"blockId": f"block-{index}"},
+                "content": [{"type": "text", "text": text}],
+            }
+            for index, text in enumerate(paragraphs or ("Placeholder.",), start=1)
+        ],
+    }
+
+
+class ContentVersionFactory(factory.django.DjangoModelFactory):  # type: ignore[misc]
+    """A version of a node's body, numbered as task 3.6 will number them.
+
+    The number is derived rather than sequenced globally, so a node's versions
+    read 1, 2, 3 in a test the way they will in the product. Allocation itself
+    belongs to 3.6; this only keeps test data honest.
+    """
+
+    class Meta:
+        model = ContentVersion
+
+    node = factory.SubFactory(ContentNodeFactory)
+    version_number = factory.LazyAttribute(
+        lambda version: ContentVersion.objects.filter(node=version.node).count() + 1
+    )
+    body = factory.LazyFunction(tiptap_document)
+    created_by = factory.SubFactory(UserFactory)
+    change_note = ""
+    is_published = False
+    previous_version = None

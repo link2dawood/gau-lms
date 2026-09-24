@@ -79,6 +79,7 @@ LOCAL_APPS: list[str] = [
     "apps.lti",
     "apps.courses",
     "apps.content",
+    "apps.versioning",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -92,6 +93,7 @@ MIGRATION_MODULES = {
     "lti": "migrations.lti",
     "courses": "migrations.courses",
     "content": "migrations.content",
+    "versioning": "migrations.versioning",
 }
 
 MIDDLEWARE = [
