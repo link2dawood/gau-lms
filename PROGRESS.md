@@ -8,7 +8,7 @@ A task is `BLOCKED` with the specific question recorded inline, so the next loop
 does not repeat the work.
 
 **Current status:** Stage 1 built; Stage 2 started. **0.8**, **1.1**–**1.17**,
-**2.1**–**2.6** are implemented. Everything awaits a Docker test run — including the
+**2.1**–**2.7** are implemented. Everything awaits a Docker test run — including the
 suite itself, which is written but has never been executed.
 
 ---
@@ -1107,7 +1107,7 @@ brings role constants, 4.4 brings rate limiting. An empty directory is a stub.
 | 2.4 | `versioning.ContentVersion` model: uuid, node fk, version_number, body (JSONB Tiptap), created_by, created_at, change_note, is_published, previous_version fk | 2.2 | **IN PROGRESS** |
 | 2.5 | `courses.CourseBook` mapping model plus service resolving which book a launched course opens | 2.1, 1.6 | **IN PROGRESS** |
 | 2.6 | Read API: `GET /api/books/:id/toc`, `GET /api/nodes/:id` returning published body plus prev/next, course-scoped and permission-checked | 2.3, 2.5, 1.11 | **IN PROGRESS** |
-| 2.7 | Tiptap JSON renderer in React: headings, paragraphs, lists, tables with headers, figures with captions and alt text, blockquotes, callouts, references, links; every top-level node renders with `id={blockId}` | 0.4 | TODO |
+| 2.7 | Tiptap JSON renderer in React: headings, paragraphs, lists, tables with headers, figures with captions and alt text, blockquotes, callouts, references, links; every top-level node renders with `id={blockId}` | 0.4 | **IN PROGRESS** |
 | 2.8 | Reader layout: collapsible TOC sidebar, breadcrumb, content pane, previous/next controls, mobile drawer TOC, sticky progress indicator | 2.6, 2.7 | TODO |
 | 2.9 | `reader.ReadingPosition` model: user, book, node, block_id, scroll_ratio, updated_at, unique per user and book | 2.2 | TODO |
 | 2.10 | Position save (debounced PATCH on section change and scroll) and restore (resume at node, scroll to block); "Continue reading" entry point | 2.9, 2.8 | TODO |
@@ -1493,6 +1493,97 @@ is what would have caught the defect above.
   than by object permission, and decide the fate of
   `CourseScoped.has_object_permission`.
 
+**2.7 notes: implemented, and — unusually for this project — actually run.**
+A renderer already existed from the interface preview (commit `1785d36`). It
+covered headings, paragraphs, lists, tables with headers, figures, blockquotes,
+callouts and links, and emitted `id={blockId}`. What it did not have is the
+thing that makes it safe to point at real content: **a guard**.
+
+`lib/content/parse.ts` is that guard — recursive, and the first real test of
+D-015 on nested data. A node body is JSONB the backend never inspects beyond
+its outer shape (D-056), so it reaches the reader as `unknown`. It is now
+narrowed rather than cast.
+
+**The guard has two biases, in opposite directions** (D-059):
+
+| Level | Behaviour | Why |
+|---|---|---|
+| the document | strict — rejected outright | not a Tiptap document means nothing to show |
+| a block | lenient — dropped, chapter renders | one malformed callout must not cost a whole section |
+| inside a block | text preserved above all | losing a paragraph is always worse than losing its formatting |
+
+So an unknown mark loses the emphasis and keeps the sentence, a heading at an
+unsupported level is clamped to h2/h3 rather than discarded (the node's own
+title owns the page's h1), a link with no destination keeps its text, and a
+block that arrived with no `blockId` keeps its text and loses only its anchor.
+
+**An unknown callout variant is never guessed at.** It renders as a neutral
+`note`. Showing a callout kind this reader does not recognise as a "Practice
+point" would understate something that might be a safety warning, and in a
+nursing textbook that is not a cosmetic mistake.
+
+`references` was the one block type in the backlog's list with no
+implementation; it is added, rendered as an ordered list inside a labelled
+`<section>`, and present in the preview sample so it is visible.
+
+**The frontend now has a unit test runner, and it runs here.**
+`playwright.unit.config.ts` points `@playwright/test` — already the pinned
+runner (D-017) — at `tests/unit/`, with no browser and no stack. No dependency
+was added and Section B's fixed stack is untouched. It is a separate config
+because the e2e suite attaches to a running Compose stack by design and cannot
+run without one; mixing them would have made the cheap tests as expensive as
+the dear ones.
+
+**38 unit tests, and they pass.** These are the first executed tests in the
+project: `npx playwright test -c playwright.unit.config.ts` → **38 passed**.
+`tsc --noEmit`, `eslint` and the **production build** (`NODE_ENV=production
+npm run build`, 10 routes, exit 0) are all clean on this host. The unit suite is
+wired into the CI frontend job as a step between TypeScript and the build.
+
+So 2.7 is the first task in this project whose every gate has actually been
+executed rather than reasoned about. The backend's have not.
+
+**Two defects found by running things, which is the point:**
+
+- `tsc` refused the new `note` variant until `CALLOUT_STYLE` covered it — the
+  exhaustive `Record<CalloutVariant, …>` did its job in the second after the
+  type changed. The backend has no equivalent loop.
+- One test failed on first run. The expectation was wrong, not the code: when
+  every mark on a run of text is dropped the `marks` key is omitted entirely
+  rather than left empty, which is what `exactOptionalPropertyTypes` requires
+  and what survives a round trip through JSON.
+
+Also fixed while there: `key={blockId}` would have collided for two blocks
+without a blockId, which is reachable now that such blocks are kept.
+
+**Owed before 2.7 can be marked DONE:**
+
+1. Render a real API response through the guard end to end, once 2.8 has the
+   bindings. Everything so far is fixtures, and the shapes were written from
+   `apps/content/views.py` rather than observed — so the one thing these tests
+   cannot prove is that the two ends agree.
+2. Confirm the new CI step runs on GitHub. The workflow has still never
+   executed there (see 0.6), so this step is as unproven as the rest of it.
+3. An accessibility pass over the rendered output — table scopes, the figure
+   caption relationship and the callout `aria-label` are written as intended
+   but have not been through a screen reader (task 2.14, then 4.6).
+
+**Points the next loops must respect:**
+
+- **Task 2.8 must put `parseContentDocument` in its binding** and never cast a
+  body. It is a `Validator<T>` (D-014), so it drops straight into `request()`.
+- **Task 2.8 must distinguish two failures**: a `malformed` error, which means
+  the contract broke, and a document that parses to zero blocks, which means
+  the content is empty. They need different screens.
+- **Task 3.5's editor is the other half of this contract.** A node type it
+  starts producing is invisible here until it is added to `types.ts` and
+  `parse.ts` — silently, because an unknown block is dropped by design. Adding
+  a node type is a change to both ends.
+- **Task 2.10 must not assume every block has an anchor.** A block with no
+  `blockId` renders without an `id`, so a reading position can point at a node
+  that is present but not scrollable-to.
+- **Task 2.13's search snippets** should reuse `utils/highlight.ts` and the
+  same `blockId` anchors this renderer emits.
 
 ---
 

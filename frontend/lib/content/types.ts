@@ -50,7 +50,17 @@ export interface TableRowNode {
   readonly content: readonly TableCellNode[];
 }
 
-export type CalloutVariant = 'clinical-alert' | 'practice-point' | 'key-term';
+/**
+ * Callout kinds the editor produces, plus `note`.
+ *
+ * `note` is the reader's fallback and nothing authors it: a callout arriving
+ * with a variant this reader does not know is rendered as a neutral note
+ * rather than dropped or guessed at. Guessing is the one unacceptable option —
+ * showing an unknown callout as a "Practice point" would understate something
+ * that might be a safety warning, and in a nursing textbook that is not a
+ * cosmetic mistake.
+ */
+export type CalloutVariant = 'clinical-alert' | 'practice-point' | 'key-term' | 'note';
 
 interface BlockAttrs {
   readonly blockId: string;
@@ -74,7 +84,18 @@ export type BlockNode =
       readonly type: 'callout';
       readonly attrs: BlockAttrs & { readonly variant: CalloutVariant; readonly title: string };
       readonly content: readonly ParagraphNode[];
+    }
+  | {
+      readonly type: 'references';
+      readonly attrs: BlockAttrs & { readonly title: string };
+      readonly content: readonly ReferenceItemNode[];
     };
+
+/** One citation. Inline content, so a reference can carry a link (rule C.7). */
+export interface ReferenceItemNode {
+  readonly type: 'referenceItem';
+  readonly content: readonly InlineNode[];
+}
 
 export interface ContentDocument {
   readonly type: 'doc';

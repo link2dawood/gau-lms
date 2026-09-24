@@ -9,7 +9,7 @@
  */
 
 import type { ContentDocument, TocNode } from '@/lib/content/types';
-import { bold, bulletList, callout, heading, paragraph, table, text } from '@/utils/tiptap';
+import { bold, bulletList, callout, heading, italic, link, paragraph, table, text } from '@/utils/tiptap';
 
 // --- Table of contents ------------------------------------------------------
 
@@ -147,6 +147,28 @@ export const SAMPLE_SECTION_BLOOD_PRESSURE: ContentDocument = {
       'Document what you did, not only what you found',
       'Record the arm used, patient position, and cuff size alongside the reading. A later value can only be compared with this one if the conditions are known.',
     ),
+    {
+      type: 'references',
+      attrs: { blockId: 'b-13', title: 'References' },
+      content: [
+        {
+          type: 'referenceItem',
+          content: [
+            text('Whelton PK et al. '),
+            italic('2017 Guideline for the Prevention, Detection, Evaluation and Management of High Blood Pressure in Adults'),
+            text('. Hypertension, 2018.'),
+          ],
+        },
+        {
+          type: 'referenceItem',
+          content: [
+            text('World Health Organization. '),
+            link('Guideline for the pharmacological treatment of hypertension in adults', 'https://www.who.int/publications/i/item/9789240033986'),
+            text('. Geneva, 2021.'),
+          ],
+        },
+      ],
+    },
   ],
 };
 

@@ -126,6 +126,15 @@ jobs:
         working-directory: frontend
         run: npm run typecheck
 
+      # Pure-function tests: the Tiptap boundary guard and anything else that
+      # takes a value and returns one. No browser and no stack, so they belong
+      # in this job rather than in the e2e one, which needs the whole system up.
+      - name: Unit tests
+        working-directory: frontend
+        env:
+          CI: 'true'
+        run: npm run test:unit
+
       # NODE_ENV must be production here. Building with NODE_ENV=development
       # makes Next mix dev and production React runtimes, and prerendering fails
       # with a useContext error that looks like an application bug.

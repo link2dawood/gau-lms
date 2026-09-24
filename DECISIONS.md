@@ -2044,3 +2044,90 @@ what protects the design — and it is what would have caught the defect above.
   published content by construction, and a flag that widens that is a flag
   somebody eventually sets.
 
+---
+
+## D-059 — The reader validates content, and prefers text to form
+
+**Date:** 2026-09-25 · **Task:** 2.7
+
+`lib/content/parse.ts` narrows an `unknown` body into a `ContentDocument`
+before the renderer sees it. It is the first recursive application of D-015,
+and it is where that decision earns its keep: a node body is JSONB the backend
+never inspects past its outer shape (D-056), so nothing between PostgreSQL and
+React knows what is in it.
+
+**Two biases, running in opposite directions.**
+
+*The envelope is strict.* Something that is not a Tiptap document is rejected,
+which the API client turns into a `malformed` error naming the request (D-014).
+There is nothing to render and no honest way to pretend otherwise.
+
+*Blocks are lenient.* An unrecognised or malformed block is dropped and the rest
+of the chapter renders. Two reasons: rejecting a section because one callout
+lost its title takes a whole chapter from a student over a defect in a paragraph
+they may not be reading; and the editor in task 3.5 will outgrow this reader, so
+content from a newer editor has to remain readable rather than become a blank
+page.
+
+*Inside a block, text wins.* An unknown mark loses its emphasis and keeps its
+sentence. A link with no destination keeps its text. A heading at a level this
+reader does not render is clamped rather than discarded. A block that arrived
+with no `blockId` keeps its text and loses only its anchor — losing a paragraph
+is always worse than losing the ability to scroll to it.
+
+**A heading is clamped to h2 or h3 because the node's title owns the h1.** One
+h1 per page is what makes the heading outline navigable, and a body heading that
+competed with the chapter title would break that for anyone moving by headings.
+
+**An unknown callout variant is never guessed at.** It becomes a neutral `note`,
+a variant nothing authors and the reader owns. Rendering an unfamiliar callout
+as a "Practice point" would put a confident, specific and possibly wrong label
+on something that might be a safety warning. In a nursing textbook that is not a
+presentation detail, so the fallback says less rather than more.
+
+**`references` was the one block type in the backlog with no implementation.**
+Added, and rendered as an ordered list inside a labelled `<section>`: a citation
+is referred to by its number, so the list has to be ordered for a screen reader
+to announce position and count.
+
+**The frontend now has a unit test runner.** `playwright.unit.config.ts` points
+`@playwright/test` — already the pinned runner under D-017 — at `tests/unit/`,
+with no browser and no stack. **No dependency was added**, so Section B's fixed
+stack is untouched. It is a second config rather than a second project in the
+existing one because the e2e suite attaches to a running Compose stack by design
+and cannot run without one; sharing a config would have made the cheap tests as
+expensive as the dear ones, and D-017's reasoning applies only to the expensive
+ones.
+
+Retries are off, including in CI. D-019 keeps retries there so an infrastructure
+hiccup does not block a merge — a test that touches nothing has no
+infrastructure to hiccup, and one that passes on the second attempt is simply
+wrong.
+
+**What this changes about how much any of this is worth.** Every claim in this
+file about backend behaviour rests on reading, hand-execution and AST
+comparison, because Docker is paused and Django is not installed. These 38 tests
+ran. The difference showed immediately: `tsc` rejected the new callout variant
+the moment `CALLOUT_STYLE` stopped being exhaustive, and one test failed on its
+first run — the expectation was wrong, not the code, which is exactly the class
+of error that hand-checking cannot find and that every unrun backend test may
+still be carrying.
+
+**Consequences:**
+
+- **Task 2.8 puts `parseContentDocument` in its binding.** It matches
+  `Validator<T>`, so it drops into `request()` unchanged, and no body is ever
+  cast.
+- **Task 2.8 must keep two failures apart**: a malformed response, meaning the
+  contract broke, and a document that parses to zero blocks, meaning the content
+  is empty. The same screen for both would send someone to debug an API over a
+  chapter nobody has written yet.
+- **Task 3.5 owns the other half of this contract.** A node type the editor
+  starts producing is invisible in the reader until `types.ts` and `parse.ts`
+  learn it — silently, because unknown blocks are dropped by design. Adding a
+  node type is a change at both ends, and the test that asserts every named
+  block type parses is what should fail first.
+- **Task 2.10 must not assume every block has an anchor.**
+- **Task 4.6's accessibility pass** inherits the table scopes, the figure
+  caption relationships and the callout labels written here. They are intended,
+  not verified: nothing has been through a screen reader.

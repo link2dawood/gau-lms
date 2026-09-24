@@ -282,7 +282,7 @@ hit pointing into the section.
 ```
 frontend/
   app/                  routes                                   built
-  components/           reader, Tiptap renderer, editor, TOC     task 2.7 onward
+  components/           reader, Tiptap renderer, editor, TOC     Tiptap renderer and its guard (2.7); reader 2.8
   lib/
     config.ts           API base URL per execution context (D-016)
     api/

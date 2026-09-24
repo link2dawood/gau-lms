@@ -9,12 +9,27 @@ import type {
 } from '@/lib/content/types';
 
 /**
+ * A block's DOM anchor, omitted when the block has none.
+ *
+ * The guard keeps a block whose `blockId` is missing rather than dropping it
+ * (see lib/content/parse.ts): losing a paragraph is worse than losing the
+ * ability to scroll to it. Such a block renders without an `id`, so nothing
+ * can anchor to it and nothing breaks.
+ */
+const anchor = (id: string) => (id ? { id } : {});
+
+/**
  * Renders a Tiptap JSON document as reading content.
  *
  * Every top-level block is emitted with `id={blockId}`, so a reading position,
- * a search result or a deep link can scroll to the exact block (rule C.7).
- * Unknown node types are skipped rather than crashing the page: the reader must
- * survive content produced by a newer editor than itself.
+ * a search result or a deep link can scroll to the exact block (rule C.7). The
+ * one exception is a block that arrived without a blockId, which renders
+ * without an anchor rather than not at all — see lib/content/parse.ts.
+ *
+ * This component trusts its input, which is what `parseContentDocument` is
+ * for: nothing reaches here unvalidated (D-015). Unknown node types are
+ * dropped by the guard, not here, so the reader survives content produced by a
+ * newer editor than itself.
  */
 export function ContentRenderer({ document }: { document: ContentDocument }) {
   return <div className="reading-flow">{document.content.map(renderBlock)}</div>;
@@ -54,10 +69,16 @@ const CALLOUT_STYLE: Record<CalloutVariant, { bar: string; label: string; title:
   'clinical-alert': { bar: 'border-danger', label: 'Clinical alert', title: 'text-danger' },
   'practice-point': { bar: 'border-accent', label: 'Practice point', title: 'text-navy' },
   'key-term': { bar: 'border-navy', label: 'Key term', title: 'text-navy' },
+  // The fallback for a callout kind this reader does not know. Neutral on
+  // purpose: see the note on CalloutVariant.
+  note: { bar: 'border-border', label: 'Note', title: 'text-navy' },
 };
 
-function renderBlock(block: BlockNode): ReactNode {
+function renderBlock(block: BlockNode, index: number): ReactNode {
   const id = block.attrs.blockId;
+  // React needs a key even when the block has no anchor, and two unanchored
+  // blocks would otherwise collide on the empty string.
+  const key = id || `block-${index}`;
   const body = 'font-serif text-[1.0625rem] leading-[1.75] text-ink';
 
   switch (block.type) {
@@ -65,8 +86,8 @@ function renderBlock(block: BlockNode): ReactNode {
       const Tag = block.attrs.level === 2 ? 'h2' : 'h3';
       return (
         <Tag
-          key={id}
-          id={id}
+          key={key}
+          {...anchor(id)}
           className={
             block.attrs.level === 2
               ? 'mt-12 scroll-mt-24 font-sans text-xl font-semibold text-navy'
@@ -79,7 +100,7 @@ function renderBlock(block: BlockNode): ReactNode {
     }
     case 'paragraph':
       return (
-        <p key={id} id={id} className={`mt-5 scroll-mt-24 ${body}`}>
+        <p key={key} {...anchor(id)} className={`mt-5 scroll-mt-24 ${body}`}>
           {block.content.map(renderInline)}
         </p>
       );
@@ -88,8 +109,8 @@ function renderBlock(block: BlockNode): ReactNode {
       const List = block.type === 'bulletList' ? 'ul' : 'ol';
       return (
         <List
-          key={id}
-          id={id}
+          key={key}
+          {...anchor(id)}
           className={`mt-5 scroll-mt-24 space-y-2 pl-6 ${body} ${block.type === 'bulletList' ? 'list-disc marker:text-accent' : 'list-decimal marker:text-ink-muted'}`}
         >
           {block.content.map((item, i) => (
@@ -102,14 +123,14 @@ function renderBlock(block: BlockNode): ReactNode {
     }
     case 'blockquote':
       return (
-        <blockquote key={id} id={id} className={`mt-6 scroll-mt-24 border-l-2 border-border pl-5 italic ${body}`}>
+        <blockquote key={key} {...anchor(id)} className={`mt-6 scroll-mt-24 border-l-2 border-border pl-5 italic ${body}`}>
           {block.content.map((para, i) => renderParagraph(para, i))}
         </blockquote>
       );
     case 'table': {
       const [head, ...rows] = block.content;
       return (
-        <figure key={id} id={id} className="mt-8 scroll-mt-24">
+        <figure key={key} {...anchor(id)} className="mt-8 scroll-mt-24">
           <div className="overflow-x-auto">
             <table className="w-full border-collapse text-left font-sans text-[0.9375rem]">
               {head !== undefined && (
@@ -153,7 +174,7 @@ function renderBlock(block: BlockNode): ReactNode {
     }
     case 'figure':
       return (
-        <figure key={id} id={id} className="mt-8 scroll-mt-24">
+        <figure key={key} {...anchor(id)} className="mt-8 scroll-mt-24">
           {/* Sized SVG/PNG from the media library; next/image is adopted with task 3.10. */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={block.attrs.src} alt={block.attrs.alt} className="w-full border border-border" />
@@ -164,8 +185,8 @@ function renderBlock(block: BlockNode): ReactNode {
       const style = CALLOUT_STYLE[block.attrs.variant];
       return (
         <aside
-          key={id}
-          id={id}
+          key={key}
+          {...anchor(id)}
           aria-label={`${style.label}: ${block.attrs.title}`}
           className={`mt-8 scroll-mt-24 border-l-[3px] bg-surface-muted py-4 pl-5 pr-5 ${style.bar}`}
         >
@@ -177,6 +198,23 @@ function renderBlock(block: BlockNode): ReactNode {
         </aside>
       );
     }
+    case 'references':
+      return (
+        <section key={key} {...anchor(id)} aria-labelledby={`${id}-heading`} className="mt-12 scroll-mt-24">
+          <h2 id={`${id}-heading`} className="font-sans text-base font-semibold text-navy">
+            {block.attrs.title}
+          </h2>
+          {/* An ordered list, because a citation is referred to by its number
+              and a screen reader should announce the count and position. */}
+          <ol className="mt-3 space-y-2 pl-6 font-sans text-sm leading-[1.6] text-ink-muted">
+            {block.content.map((item, i) => (
+              <li key={i} className="pl-1">
+                {item.content.map(renderInline)}
+              </li>
+            ))}
+          </ol>
+        </section>
+      );
     default:
       return null;
   }
