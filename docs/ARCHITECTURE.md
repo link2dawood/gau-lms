@@ -83,7 +83,7 @@ phase — separable into its own service without rewriting the core.
 | Layer | Technology | Status |
 |---|---|---|
 | Backend | Django 5.2 LTS, Python 3.12, Django REST Framework | **built** |
-| LTI 1.3 | PyLTI1p3 | task 1.3 |
+| LTI 1.3 | PyLTI1p3 | **built** — OIDC login and launch validation (1.4, 1.5) |
 | Database | PostgreSQL 16 | **built** |
 | Search | Meilisearch 1.12 | running; indexing in task 2.11 |
 | Frontend | Next.js 14, React 18, TypeScript, Tailwind CSS | **built** |
@@ -106,7 +106,7 @@ Nginx splits the URL space at the edge (`docker/nginx/conf.d/app.conf`):
 | Path | Served by | Notes |
 |---|---|---|
 | `/api/` | Django | JSON API. Default-deny; see D-012. |
-| `/lti/` | Django | OIDC login, launch, JWKS, deep linking (tasks 1.3–1.14). |
+| `/lti/` | Django | JWKS, OIDC login, launch and ticket exchange **built**; deep linking in task 1.14. Unauthenticated by design — Canvas reaches these before any session exists, and they set their own `frame-ancestors` policy (D-031). |
 | `/admin/` | Django | Django admin, for staff only. |
 | `/static/` | Nginx, from disk | Django's collected static files. |
 | `/media/` | Nginx, from disk | Figures and illustrations uploaded through the CMS. |
@@ -122,7 +122,7 @@ Nginx splits the URL space at the edge (`docker/nginx/conf.d/app.conf`):
 4. Later requests from the browser — saving a reading position, running a
    search — go same-origin through Nginx, so the session cookie is sent.
 
-### A Canvas launch *(tasks 1.4–1.12)*
+### A Canvas launch *(steps 1–4 built in tasks 1.4–1.9; role routing in 1.12)*
 
 1. Canvas POSTs an OIDC login initiation to `/lti/login/`. The platform
    generates `state` and a `nonce`, stores both in Redis with a short expiry
@@ -133,11 +133,14 @@ Nginx splits the URL space at the edge (`docker/nginx/conf.d/app.conf`):
 3. The provisioning service upserts the user, course and membership from the
    launch claims **in one transaction**. A first launch creates the user; a
    repeat launch never creates a second account.
-4. A session is established. Because the reader runs inside a Canvas iframe its
-   cookie is cross-site, so it must be `SameSite=None; Secure` — which is why
-   Nginx forwards `X-Forwarded-Proto` and Django trusts it
-   (`SECURE_PROXY_SSL_HEADER`). Browsers that block third-party cookies get a
-   new-window fallback (task 1.10).
+4. A session is established and the browser is redirected to the frontend with
+   a short-lived, single-use launch ticket. Because the reader runs inside a
+   Canvas iframe its cookie is cross-site, so it is `SameSite=None; Secure;
+   HttpOnly` — which is why Nginx forwards `X-Forwarded-Proto` and Django
+   trusts it (`SECURE_PROXY_SSL_HEADER`). A browser that blocks third-party
+   cookies discards that cookie silently; the ticket is what lets the
+   new-window fallback (task 1.10) establish a session from a first-party
+   context, by posting it to `/lti/session/`.
 5. The frontend routes by role: student to the reader, faculty to the dashboard,
    administrators offered the CMS.
 
@@ -146,22 +149,25 @@ Nginx splits the URL space at the edge (`docker/nginx/conf.d/app.conf`):
 ## Backend modules
 
 `backend/` is laid out as follows. Modules marked with a task number do not exist
-yet; `config/settings/base.py` lists them in `LOCAL_APPS`, commented, in the
+yet; `core/settings/base.py` lists them in `LOCAL_APPS`, commented, in the
 order they arrive.
 
 ```
 backend/
-  config/                 project configuration                        built
+  core/                   platform configuration                       built
     settings/
-      env.py              typed environment reader (D-011)
+      env.py              typed environment and secrets loader (D-011)
       base.py             shared settings
       dev.py  prod.py  test.py
     celery.py             Celery app and queue routing (D-013)
     health.py             readiness and liveness endpoints
     urls.py               root URL map
+    wsgi.py  asgi.py
+  migrations/             every module's migrations, in one place      built
+    accounts/             mapped by MIGRATION_MODULES (D-024)
   apps/
     accounts/             User, role normalisation                     task 1.1
-    lti/                  launch, OIDC, JWKS, deep linking, NRPS        task 1.2
+    lti/                  launch, OIDC, JWKS, deep linking, NRPS       platforms, keys, JWKS, login, launch, session (1.2–1.9)
     courses/              Course, CourseMembership, CourseBook         task 1.6
     content/              Book, ContentNode, tree service              task 2.1
     versioning/           ContentVersion, publish, diff, restore       task 2.4
@@ -169,8 +175,16 @@ backend/
     search/               Meilisearch client and indexers              task 2.11
     cms/                  admin API for hierarchy and editing          task 3.1
     imports/              Pandoc/Poppler pipeline                      task 3.11
+  utils/                  shared utilities, added with the first one
   tests/
 ```
+
+Migrations are gathered rather than kept inside each app, so the schema history
+of the platform reads in order and a change spanning modules shows its
+migrations together (D-024). Django finds them only through `MIGRATION_MODULES`
+in `core/settings/base.py`: an app added without an entry there is treated as
+having no migrations and its tables are never created, which
+`tests/test_structure.py` guards against.
 
 ### Module boundaries
 
@@ -350,7 +364,7 @@ explanation. Routing is by module path, so task modules must live at
 ## Configuration
 
 Every setting comes from the environment through one typed reader,
-`config/settings/env.py`, which fails loudly on missing or malformed values
+`core/settings/env.py`, which fails loudly on missing or malformed values
 rather than guessing. Production settings refuse to start when a security-
 critical value is absent.
 

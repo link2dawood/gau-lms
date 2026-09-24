@@ -56,7 +56,7 @@ services reach each other by service name on the private bridge.
 
 ## How configuration is read
 
-`backend/config/settings/env.py` is the only place the environment is read. It
+`backend/core/settings/env.py` is the only place the environment is read. It
 is built on the standard library, and it is deliberately unforgiving:
 
 - **A missing required variable raises at import, naming the variable.** The
@@ -75,7 +75,7 @@ The environment chooses between them with `DJANGO_SETTINGS_MODULE`.
 
 ### Production settings refuse to start when misconfigured
 
-Under `config.settings.prod`, these are fatal rather than defaulted:
+Under `core.settings.prod`, these are fatal rather than defaulted:
 
 | Condition | Why it is fatal |
 |---|---|
@@ -127,6 +127,7 @@ a queued import or an in-flight LTI nonce.
 | `CELERY_BROKER_URL` | **required** | Queued jobs. Database 1. Flushing loses queued imports. |
 | `CELERY_RESULT_BACKEND` | **required** | Task results. Database 2. |
 | `LTI_STATE_REDIS_URL` | **required** | OIDC state and nonces during a launch. Database 3. Flushing breaks launches in progress. |
+| `SESSION_REDIS_URL` | *(required)* | Redis database holding sessions. Separate from the page cache because a session is not cache: clearing a stale page must not sign every reader out, and LRU eviction must not be able to drop one. See DECISIONS.md D-039. |
 
 ### Meilisearch
 
@@ -142,12 +143,14 @@ a queued import or an in-flight LTI nonce.
 | Variable | Default | Purpose |
 |---|---|---|
 | `DJANGO_SECRET_KEY` | **required** | Signs sessions and CSRF tokens. Rotating it invalidates every active session. Never reuse across environments. |
-| `DJANGO_SETTINGS_MODULE` | `config.settings.dev` | One of `config.settings.{dev,prod,test}`. |
+| `DJANGO_SETTINGS_MODULE` | `core.settings.dev` | One of `core.settings.{dev,prod,test}`. |
 | `DJANGO_DEBUG` | `true` | *Development only.* Production forces it off. |
 | `DJANGO_ALLOWED_HOSTS` | dev: `localhost,127.0.0.1,backend,nginx,testserver` | Comma-separated hostnames. **Required and non-empty in production**, where there is no default. |
 | `DJANGO_CSRF_TRUSTED_ORIGINS` | dev: `http://localhost:8080,http://127.0.0.1:8080` | Comma-separated absolute origins. **Required and non-empty in production**, where there is no default, and `https://` there. |
 | `PLATFORM_BASE_URL` | **required** | Public origin of the tool, no trailing slash. Builds the LTI redirect URIs and the JWKS URL given to the Canvas administrator. |
 | `CANVAS_FRAME_ANCESTORS` | *(empty)* | Canvas hosts permitted to embed the reader in an iframe. Enforced as a CSP `frame-ancestors` directive in task 4.4. |
+| `LTI_PLATFORMS_FILE` | *(unset)* | Path to the JSON file listing the Canvas platforms the tool trusts (issuer, client id, deployment ids, the three Canvas endpoint URLs). Applied with `manage.py sync_lti_platforms`. Unset means no platform can launch the tool. Gitignored — it names a specific institution's Canvas. See DECISIONS.md D-025. |
+| `LTI_TOOL_KEY_DIR` | `backend/lti-keys` | Directory holding this tool's RSA private keys, one PKCS#8 PEM per key named by its `kid`, mode `0600`. Created by `manage.py create_lti_key`; the public halves are served at `/lti/jwks/`. Gitignored. **Must be a persistent volume on the server (task 4.8)** — losing it means re-pointing every Canvas registration at a new key. See DECISIONS.md D-026. |
 | `DJANGO_LOG_LEVEL` | `INFO` | Root log level. |
 | `DJANGO_LOG_SQL` | `false` | *Development only.* Echoes every SQL statement; very noisy. |
 | `DJANGO_LANGUAGE_CODE` | `en-us` | |
@@ -155,7 +158,7 @@ a queued import or an in-flight LTI nonce.
 
 ### Production security
 
-Applied only under `config.settings.prod`. The defaults are correct; change them
+Applied only under `core.settings.prod`. The defaults are correct; change them
 only with a specific reason.
 
 | Variable | Default | Purpose |
