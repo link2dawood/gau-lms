@@ -57,7 +57,7 @@ function Column({ title, subtitle, lines }: { title: string; subtitle: string; l
 export default function VersionHistoryPreview() {
   return (
     <div className="min-h-dvh bg-surface-muted">
-      <AppHeader courseCode="Content management" courseTitle={SAMPLE_BOOK.title} role="Content administrator" />
+      <AppHeader homeHref="/preview/student" courseCode="Content management" courseTitle={SAMPLE_BOOK.title} role="Content administrator" />
 
       <main className="mx-auto max-w-7xl px-5 pb-20 pt-8 sm:px-8">
         <p className="text-sm text-ink-muted">Section 6.4</p>

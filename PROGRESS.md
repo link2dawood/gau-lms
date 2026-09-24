@@ -8,7 +8,7 @@ A task is `BLOCKED` with the specific question recorded inline, so the next loop
 does not repeat the work.
 
 **Current status:** Stage 1 built; Stage 2 started. **0.8**, **1.1**–**1.17**,
-**2.1**–**2.7** are implemented. Everything awaits a Docker test run — including the
+**2.1**–**2.8** are implemented. Everything awaits a Docker test run — including the
 suite itself, which is written but has never been executed.
 
 ---
@@ -1108,7 +1108,7 @@ brings role constants, 4.4 brings rate limiting. An empty directory is a stub.
 | 2.5 | `courses.CourseBook` mapping model plus service resolving which book a launched course opens | 2.1, 1.6 | **IN PROGRESS** |
 | 2.6 | Read API: `GET /api/books/:id/toc`, `GET /api/nodes/:id` returning published body plus prev/next, course-scoped and permission-checked | 2.3, 2.5, 1.11 | **IN PROGRESS** |
 | 2.7 | Tiptap JSON renderer in React: headings, paragraphs, lists, tables with headers, figures with captions and alt text, blockquotes, callouts, references, links; every top-level node renders with `id={blockId}` | 0.4 | **IN PROGRESS** |
-| 2.8 | Reader layout: collapsible TOC sidebar, breadcrumb, content pane, previous/next controls, mobile drawer TOC, sticky progress indicator | 2.6, 2.7 | TODO |
+| 2.8 | Reader layout: collapsible TOC sidebar, breadcrumb, content pane, previous/next controls, mobile drawer TOC, sticky progress indicator | 2.6, 2.7 | **IN PROGRESS** |
 | 2.9 | `reader.ReadingPosition` model: user, book, node, block_id, scroll_ratio, updated_at, unique per user and book | 2.2 | TODO |
 | 2.10 | Position save (debounced PATCH on section change and scroll) and restore (resume at node, scroll to block); "Continue reading" entry point | 2.9, 2.8 | TODO |
 | 2.11 | Meilisearch index design: one document per content block with node path, chapter title, section title, plain text, block id, book id | 0.2 | TODO |
@@ -1585,6 +1585,101 @@ without a blockId, which is reachable now that such blocks are kept.
 - **Task 2.13's search snippets** should reuse `utils/highlight.ts` and the
   same `blockId` anchors this renderer emits.
 
+**2.8 notes: implemented, type-checked, linted, built and unit-tested on this
+host; the API contract itself is still unproven.** `/reader` is the real
+reader: `lib/api/content.ts` binds the three endpoints from 2.6, and
+`app/reader/page.tsx` renders one node with the book around it.
+
+**Rendered on the server**, which needed something D-016 did not anticipate:
+`credentials: 'include'` means nothing outside a browser, so a React Server
+Component fetching the read API arrives at Django anonymous and every
+course-scoped endpoint refuses it. `lib/api/server.ts` forwards the incoming
+request's cookies one hop to the internal API. Without it the reader would have
+had to fetch from the browser, leaving an empty frame inside Canvas until a
+second round trip finished — the exact cost D-016 chose the internal base URL
+to avoid.
+
+**`?node=` is honoured as a preference, not an access decision**, which is what
+D-050 says a deep-linked node id is. A node that is not in the published
+contents — withdrawn since the link was made, from another book, or typed —
+falls back to the start of the book rather than erroring. The request was for
+the textbook.
+
+**Each failure gets its own screen** (D-014 finally paying off in the UI): an
+expired session says to reopen from Canvas, a refusal says the content belongs
+to another course, an unreachable backend says to try again, and a malformed
+response says the fault is ours — because telling someone to retry something
+that cannot work is worse than saying nothing.
+
+**The contents component was rewritten recursively.** The preview's version
+assumed unit → chapter → section; the content model has four levels, and D-055
+allows an irregular import to attach a section directly under a unit. A
+three-level component would have silently stopped rendering the fourth.
+
+**Display numbering is deliberately absent, and is now an open question for
+GAU.** The preview shows "6.4"; the API sends no number, and deriving one in
+the reader would be actively wrong — the contents are published-only, so a
+chapter's number would shift whenever a neighbour was unpublished, and a
+citation would stop meaning what it meant. The component takes an optional
+`number` so the preview keeps its design, and the reader shows none until the
+rule is decided.
+
+**Two shared components had preview paths baked into them** — `AppHeader`
+linked its wordmark to `/preview/student`, and `ReaderShell` pointed search at
+`/preview/search`. Both are props now, so the real reader does not carry links
+into a demo, and search stays hidden until 2.13 builds it. `fetchLaunchContext`
+was widened to take `RequestOptions` like every other binding, which the two
+call sites in `LaunchRouter` follow.
+
+**Fixed while there:** the progress indicator was not sticky, though the
+backlog asks for one — it scrolled away under the header, which stops it
+answering the only question it exists for. It now sticks below the header and
+has a track. And `searchParams.node` was typed as a string when Next hands back
+an array for a repeated key; the first value now wins rather than the type
+quietly lying.
+
+**24 unit tests added for the bindings and the navigation helpers (62 in the
+frontend suite, all passing).** `tsc`, `eslint` and the production build are
+clean.
+
+**What these tests cannot prove, and it is the important part:** the response
+shapes were written by reading `apps/content/views.py`, not by observing a
+response. Both ends are green and have never met. A disagreement about a field
+name or a nesting level would look exactly like this.
+
+**Owed before 2.8 can be marked DONE:**
+
+1. Run the stack and load a real chapter. This is the first end-to-end
+   exercise of launch → session → read API → reader, and the first time the
+   API's shapes are seen rather than assumed.
+2. Confirm the forwarded cookie actually authenticates the server-side call.
+   If the session cookie is `HttpOnly; SameSite=None; Secure` (D-037) it
+   should arrive, but nothing has demonstrated it.
+3. A Playwright e2e pass over the reader: contents, breadcrumb, prev/next
+   across a chapter boundary, the mobile drawer, and the deep-link fallback.
+4. Check the reader inside a real Canvas iframe, where the third-party cookie
+   rules of D-041 apply.
+
+**Points the next loops must respect:**
+
+- **Task 2.10's reading position** should scroll to a `blockId` anchor the
+  renderer emits, and must tolerate a block that has none (D-059).
+- **Task 2.9/2.10 must keep the position keyed on node uuid**, not on the
+  `?node=` string or the contents index.
+- **Task 2.13** gets `searchHref` on `ReaderShell`; the control is hidden
+  until it is passed.
+- **Task 4.1** takes over `homeHref`, which currently points back at the
+  reader.
+- **Task 1.12's launch page still presents rather than redirects.** D-046 said
+  2.8 could switch to an automatic redirect once the reader was real. It is
+  real for students, but `/faculty` (task 4.2) is not, so the switch can only
+  be made for one role — and a launch that redirects students while presenting
+  to faculty is less coherent than the consistent page there now. Left for 4.2,
+  when both destinations exist.
+- The reader's `<title>` is static. Making it the node's title needs
+  `generateMetadata`, which would repeat the fetches; worth doing once there is
+  a request-level cache.
+
 ---
 
 ## Stage 3: Deliverable 3 — Content Management System
@@ -1665,6 +1760,15 @@ following are known to be needed before the tasks that depend on them:
 - Hosting target confirmation and the platform subdomain with DNS access —
   needed for **4.8**.
 - Course-to-book mapping for the demonstration course — needed for **2.5**.
+- **How should chapters and sections be numbered for display?** The interface
+  preview shows "6.4"; the read API sends no such number, and 2.8 ships without
+  one. Deriving it in the reader would be wrong: the contents are filtered to
+  published nodes, so a chapter's number would shift whenever a neighbouring
+  chapter was unpublished, and a student's citation of "6.4" would stop
+  meaning what it meant. It needs an editorial rule from GAU — continuous
+  across the book or restarting per unit, and whether an author sets it — and
+  then a column, computed from the full tree. Needed for **2.8** to match the
+  preview and before **2.13** shows numbers in search results.
 - **Is GAU's Canvas cloud-hosted or self-hosted, and will this platform ever
   serve a second institution?** Every Instructure-hosted Canvas shares one
   `iss`, so the course identity carries the `tool_platform` guid to keep two

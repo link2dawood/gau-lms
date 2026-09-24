@@ -10,7 +10,7 @@ export const metadata = { title: '6.4 Blood pressure' };
 
 export default function ReaderPreview({ searchParams }: { searchParams: { contents?: string } }) {
   const contents = (
-    <TableOfContents toc={SAMPLE_TOC} currentId="s64" hrefFor={() => '/preview/reader'} />
+    <TableOfContents items={SAMPLE_TOC} currentId="s64" hrefFor={() => '/preview/reader'} />
   );
 
   return (
@@ -20,6 +20,8 @@ export default function ReaderPreview({ searchParams }: { searchParams: { conten
       contents={contents}
       progress={0.46}
       initiallyOpen={searchParams.contents === 'open'}
+      homeHref="/preview/student"
+      searchHref="/preview/search"
     >
       <article className="mx-auto max-w-prose">
         <nav aria-label="Breadcrumb" className="text-sm text-ink-muted">

@@ -13,7 +13,7 @@ const TOOLS = ['Heading', 'Bold', 'Italic', 'List', 'Link', 'Table', 'Figure', '
 export default function CmsEditorPreview() {
   return (
     <div className="flex min-h-dvh flex-col bg-surface-muted">
-      <AppHeader courseCode="Content management" courseTitle={SAMPLE_BOOK.title} role="Content administrator" />
+      <AppHeader homeHref="/preview/student" courseCode="Content management" courseTitle={SAMPLE_BOOK.title} role="Content administrator" />
 
       <div className="flex min-h-0 flex-1">
         <aside className="hidden w-80 shrink-0 overflow-y-auto border-r border-border bg-surface py-4 lg:block">

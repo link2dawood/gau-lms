@@ -16,7 +16,7 @@ export default function FacultyPreview() {
 
   return (
     <div className="min-h-dvh bg-surface-muted">
-      <AppHeader
+      <AppHeader homeHref="/preview/student"
         courseCode={SAMPLE_BOOK.course.code}
         courseTitle={SAMPLE_BOOK.course.title}
         role="Faculty"

@@ -78,7 +78,7 @@ export function LaunchRouter(): JSX.Element {
 
     async function resolve(): Promise<void> {
       const ticket = readTicket();
-      let result = await fetchLaunchContext(controller.signal);
+      let result = await fetchLaunchContext({ signal: controller.signal });
       if (controller.signal.aborted) return;
 
       // The cookie did not survive. If the launch handed us a ticket, that is
@@ -90,7 +90,7 @@ export function LaunchRouter(): JSX.Element {
         await redeemLaunchTicket(ticket, controller.signal);
         if (controller.signal.aborted) return;
 
-        result = await fetchLaunchContext(controller.signal);
+        result = await fetchLaunchContext({ signal: controller.signal });
         if (controller.signal.aborted) return;
       }
 

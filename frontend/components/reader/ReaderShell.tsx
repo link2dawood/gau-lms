@@ -18,6 +18,8 @@ export function ReaderShell({
   progress,
   children,
   initiallyOpen = false,
+  homeHref,
+  searchHref,
 }: {
   // Plain data rather than a render function: this is a client component, and
   // functions cannot cross the server/client boundary.
@@ -28,6 +30,9 @@ export function ReaderShell({
   progress: number;
   children: React.ReactNode;
   initiallyOpen?: boolean;
+  homeHref?: string;
+  /** Omitted until search exists (task 2.13), which hides the control. */
+  searchHref?: string;
 }) {
   const [open, setOpen] = useState(initiallyOpen);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -59,18 +64,29 @@ export function ReaderShell({
 
   return (
     <div className="min-h-dvh bg-surface">
-      <AppHeader courseCode={course.code} courseTitle={course.title} role={role} searchHref="/preview/search">
+      <AppHeader
+        courseCode={course.code}
+        courseTitle={course.title}
+        role={role}
+        {...(homeHref !== undefined ? { homeHref } : {})}
+        {...(searchHref !== undefined ? { searchHref } : {})}
+      >
         {menuButton}
       </AppHeader>
+      {/* Sticky, directly under the 3.5rem header: a progress indicator that
+          scrolls away stops answering the question it exists for, which is
+          "how much of this is left" while you are reading. The track is a
+          sibling so the filled bar can be a percentage of full width. */}
       <div
-        className="h-[3px] bg-accent"
-        style={{ width: `${Math.round(progress * 100)}%` }}
+        className="sticky top-14 z-20 h-[3px] bg-border"
         role="progressbar"
         aria-label="Progress through the textbook"
         aria-valuenow={Math.round(progress * 100)}
         aria-valuemin={0}
         aria-valuemax={100}
-      />
+      >
+        <div className="h-full bg-accent" style={{ width: `${Math.round(progress * 100)}%` }} />
+      </div>
       <div className="mx-auto flex max-w-[88rem]">
         <aside className="sticky top-14 hidden h-[calc(100dvh-3.5rem)] w-80 shrink-0 overflow-y-auto border-r border-border py-8 pl-3 pr-4 lg:block">
           {contents}

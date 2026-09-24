@@ -13,19 +13,23 @@ export function AppHeader({
   courseTitle,
   role,
   searchHref,
+  homeHref = '/reader',
   children,
 }: {
   courseCode: string;
   courseTitle: string;
   role: Role;
+  /** Omitted until search exists (task 2.13); the control is hidden without it. */
   searchHref?: string;
+  /** Where the wordmark leads. The student home takes this over at task 4.1. */
+  homeHref?: string;
   children?: React.ReactNode;
 }) {
   return (
     <header className="sticky top-0 z-30 border-b border-border bg-surface">
       <div className="flex h-14 items-center gap-3 px-4 lg:px-6">
         {children}
-        <Link href="/preview/student" className="flex shrink-0 items-center gap-2.5 text-navy">
+        <Link href={homeHref} className="flex shrink-0 items-center gap-2.5 text-navy">
           <span className="grid h-7 w-7 place-items-center bg-navy font-serif text-sm font-semibold text-white">G</span>
           <span className="font-semibold tracking-tight">GAU Textbook</span>
         </Link>

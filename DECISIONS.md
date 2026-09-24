@@ -2131,3 +2131,90 @@ still be carrying.
 - **Task 4.6's accessibility pass** inherits the table scopes, the figure
   caption relationships and the callout labels written here. They are intended,
   not verified: nothing has been through a screen reader.
+
+---
+
+## D-060 — The reader renders on the server, and forwards the session to do it
+
+**Date:** 2026-09-25 · **Task:** 2.8 · *Completes D-016*
+
+`/reader` is a React Server Component. `lib/api/server.ts` forwards the
+incoming request's cookies to the internal API so that it can be.
+
+**Why the forwarding is necessary and was not foreseen.** D-016 chose
+`INTERNAL_API_BASE_URL` precisely so a server-rendered chapter would not leave
+the container, traverse Nginx and come back on the critical path of first
+paint. What it did not record is that `credentials: 'include'` — which the API
+client sets — means nothing outside a browser. There is no cookie jar on the
+server, only the request Next is currently handling, so a server-rendered call
+would have reached Django anonymous and been refused by every course-scoped
+endpoint (D-012). The reader would then have had to fetch from the browser,
+leaving an empty frame inside Canvas until a second round trip finished, which
+is the cost D-016 exists to avoid.
+
+The whole cookie jar is forwarded rather than one named cookie. The session
+cookie's name is a backend setting the frontend deliberately does not know
+(rule C.6), and this is the browser's own request relayed one hop to the same
+platform's API over the compose network — not a credential handed to a third
+party. Reading cookies also opts the render out of static generation, which is
+correct: a reader's page is per-user and course-scoped, and caching one is the
+bug rather than the optimisation.
+
+**`?node=` is a preference, never an access decision.** D-050 established that
+a deep-linked node id is a preference expressed inside a verified launch. The
+reader follows that: a node id naming something outside the published contents
+— withdrawn since the link was made, belonging to another book, or simply typed
+— falls back to the start of the book rather than failing. The request was for
+the textbook; the section was a wish. Access is decided entirely by the session
+and the mapping (D-057, D-058), so nothing is widened by being generous here.
+
+**Every failure kind gets its own screen.** This is what D-014's discriminated
+union was for, reached at last: an expired session says to reopen from Canvas,
+a refusal says the content belongs to another course, an unreachable backend
+says to try again, and a malformed response says the fault is ours. Collapsing
+the last into "try again" would send someone to retry something that cannot
+work.
+
+**Display numbering is deliberately absent, and is a question for GAU.** The
+interface preview shows "6.4". The read API sends no such number, and deriving
+one in the reader would be actively wrong rather than merely approximate: the
+contents are filtered to published nodes, so a chapter's number would shift
+whenever a neighbouring chapter was unpublished, and a student's citation of
+"6.4" would stop meaning what it meant. Numbering has to be stable, which means
+computed from the **full** tree and stored — and the rule for it (continuous
+across the book or restarting per unit, author-set or derived) is editorial,
+not technical. The contents component takes an optional `number` so the preview
+keeps its design; the reader shows none until GAU decides.
+
+**The contents component is recursive now.** The preview's assumed unit →
+chapter → section. The content model has four levels, and D-055 deliberately
+allows an irregular import to attach a section directly under a unit, so a
+three-level component would have stopped rendering the fourth without
+complaining.
+
+**Two shared components carried preview paths.** `AppHeader` linked its
+wordmark to `/preview/student` and `ReaderShell` pointed search at
+`/preview/search` — fine while only the preview used them, and a link from the
+product into a demo the moment the reader was real. Both are props.
+
+**Consequences:**
+
+- **The two ends are green and have never met.** Every response shape here was
+  written by reading `apps/content/views.py` rather than by observing a
+  response. 62 frontend tests pass and prove the guards behave as designed;
+  they cannot prove the backend sends what the guards expect. The first stack
+  run settles it, and a disagreement would look exactly like this.
+- **Task 1.12's launch page still presents rather than redirects.** D-046 said
+  2.8 could switch to an automatic redirect once the reader existed. It exists
+  for students, but `/faculty` does not, so the switch can only be made for one
+  role — and redirecting students while presenting to faculty is less coherent
+  than the consistent page there now. Left for **4.2**, when both destinations
+  exist.
+- **Task 2.10** scrolls to a `blockId` anchor and must tolerate a block with
+  none (D-059), and must key a position on the node uuid rather than on the
+  `?node=` string.
+- **Task 2.13** is handed `searchHref` on `ReaderShell`; the control stays
+  hidden until it is passed.
+- The reader's `<title>` is static. Making it the node's title needs
+  `generateMetadata`, which would repeat both fetches — worth doing once there
+  is a request-level cache, not before.

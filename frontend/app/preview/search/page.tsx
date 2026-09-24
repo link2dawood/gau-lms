@@ -12,7 +12,7 @@ export default function SearchPreview() {
 
   return (
     <div className="min-h-dvh bg-surface">
-      <AppHeader courseCode={SAMPLE_BOOK.course.code} courseTitle={SAMPLE_BOOK.course.title} role="Student" />
+      <AppHeader homeHref="/preview/student" courseCode={SAMPLE_BOOK.course.code} courseTitle={SAMPLE_BOOK.course.title} role="Student" />
 
       <main className="mx-auto max-w-3xl px-5 pb-20 pt-10 sm:px-8">
         <form action="/preview/search" className="flex border-b-2 border-navy">

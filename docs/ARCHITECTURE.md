@@ -282,14 +282,21 @@ hit pointing into the section.
 ```
 frontend/
   app/                  routes                                   built
-  components/           reader, Tiptap renderer, editor, TOC     Tiptap renderer and its guard (2.7); reader 2.8
+  components/           reader, Tiptap renderer, editor, TOC     renderer and reader built (2.7, 2.8); editor 3.5
   lib/
     config.ts           API base URL per execution context (D-016)
     api/
       client.ts         typed request(), returning ApiResult<T>
       errors.ts         ApiError kinds and user-safe messages
       health.ts         the worked example every binding follows
-  tests/e2e/            Playwright specs
+      content.ts        the read API: textbook, contents, node (2.6)
+      server.ts         forwards the session on a server render (D-060)
+    content/
+      types.ts          Tiptap document and contents types
+      parse.ts          validates a body at the boundary (D-059)
+      toc.ts            reading order, progress, deep-link fallback
+  tests/e2e/            Playwright specs, against the running stack
+  tests/unit/           pure functions, no browser and no stack (D-059)
 ```
 
 ### Calling the API

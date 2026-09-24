@@ -10,7 +10,7 @@
  * launch set, since inside a Canvas iframe it is a third-party cookie.
  */
 
-import { request } from '@/lib/api/client';
+import { request, type RequestOptions } from '@/lib/api/client';
 import type { ApiResult } from '@/lib/api/errors';
 
 /** The platform's three roles. Mirrors `courses.Role` on the backend. */
@@ -77,8 +77,10 @@ export function parseRedeemedSession(value: unknown): RedeemedSession | null {
   return { courseId, role: candidate.role };
 }
 
-export function fetchLaunchContext(signal?: AbortSignal): Promise<ApiResult<LaunchContext>> {
-  return request('/lti/context/', parseLaunchContext, signal ? { signal } : {});
+export function fetchLaunchContext(
+  options: RequestOptions = {},
+): Promise<ApiResult<LaunchContext>> {
+  return request('/lti/context/', parseLaunchContext, options);
 }
 
 /**
